@@ -68,7 +68,7 @@ static int mthp_read_header(AVFormatContext *s,
         return AVERROR(ENOMEM);
 
     av_set_pts_info(st, 64, 1, fps);
-    st->codec->codec_type   = CODEC_TYPE_VIDEO;
+    st->codec->codec_type   = AVMEDIA_TYPE_VIDEO;
     st->codec->codec_id     = CODEC_ID_THP;
     st->codec->codec_tag    = 0;  /* no fourcc */
     st->codec->width        = width;
@@ -105,11 +105,11 @@ static int mthp_read_packet(AVFormatContext *s, AVPacket *pkt)
     return 0;
 }
 
-AVInputFormat mthp_demuxer = {
-    "mthp",
-    NULL_IF_CONFIG_SMALL("MTHP"),
-    sizeof(int*),
-    mthp_probe,
-    mthp_read_header,
-    mthp_read_packet
+AVInputFormat ff_mthp_demuxer = {
+    .name           = "mthp",
+    .long_name      = NULL_IF_CONFIG_SMALL("MTHP"),
+    .priv_data_size = sizeof(int*),
+    .read_probe     = mthp_probe,
+    .read_header    = mthp_read_header,
+    .read_packet    = mthp_read_packet
 };
