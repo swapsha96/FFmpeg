@@ -171,6 +171,8 @@ library:
 @item MIME multipart JPEG       @tab X @tab
 @item MSN TCP webcam            @tab   @tab X
     @tab Used by MSN Messenger webcam streams.
+@item MTHP
+    @tab Used on the Nintendo GameCube.
 @item MTV                       @tab   @tab X
 @item Musepack                  @tab   @tab X
 @item Musepack SV8              @tab   @tab X
