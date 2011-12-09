@@ -219,19 +219,8 @@ static const int8_t a_table[2][16] = {
     { -39, -22, -13,  -8,  -5,  -2, -1,  0, 1, 2, 5,  8, 13, 20, 31, 48},
 };
 
-#ifdef DEBUG
-static void dump_table(const int8_t *table, char name, uint64_t score)
-{
-    int i;
-    dprintf("%c %7"PRIx64" ", name, score);
-    for(i=0; i<16; i++)
-        dprintf(" %2x", table[i]&0xff);
-    dprintf("\n");
-}
-#endif
-
 static uint64_t build_table(CyuvContext *s, int8_t *table, uint8_t **pix, int pixn, int plane, int w,
-nt stride)
+int stride)
 {
     const int h = s->avctx->height;
     int i, j;
@@ -239,13 +228,9 @@ nt stride)
 
     for(i=0; i<N_TABLES; i++){
         ssd = try_table(some_tables[!!plane][i], table, &bssd, pix, pixn, w, h, stride);
-        dprintf("%7"PRIx64" ", ssd);
-        if(ssd == 0){
-            dprintf("\n");
+        if(ssd == 0)
             return ssd;
-        }
     }
-    dprintf("\n");
 
     // Iterative refinement:
     // 16-dimensional diamond search, encoding the whole frame at each step
@@ -259,9 +244,6 @@ nt stride)
         // modify 1 entry at a time
         for(j=0; j<99; j++){
             int bssd_bakj = bssd;
-#ifdef DEBUG
-            dump_table(table, "YUV"[plane], bssd);
-#endif
             for(i=0; i<16; i++){
                 int v = table[i];
                 int bssd_baki = bssd;
@@ -294,9 +276,6 @@ nt stride)
         if(s->avctx->context_model >= 3){
             for(j=0; j<99; j++){
                 int bssd_bakj = bssd;
-#ifdef DEBUG
-                dump_table(table, "YUV"[plane], bssd);
-#endif
                 for(i=0; i<16*16*4; i++){
                     int i0= i&15;
                     int i1= (i>>4)&15;
@@ -336,7 +315,6 @@ static void train_tables(CyuvContext *s, int plane)
 
     s->avctx->context_model = 3;
 
-    dprintf("training plane %d\n", plane);
     for(pass=0; pass<99; pass++){
         int8_t tables_bak[k][16], tmp[16];
         uint8_t *pix[k][n];
@@ -346,7 +324,6 @@ static void train_tables(CyuvContext *s, int plane)
         memset(pixn, 0, sizeof(pixn));
         memset(ssdj, 0, sizeof(ssdj));
         // assign each frame to the table that best codes it
-        dprintf("mapping ");
         for(i=0; i<n; i++){
             uint64_t bssd = 1ULL<<63;
             int bj = 0;
@@ -359,15 +336,7 @@ static void train_tables(CyuvContext *s, int plane)
             ssdi[i] = bssd;
             pixk[i] = bj;
             pix[bj][pixn[bj]++] = all_frames[i];
-            dprintf("%d", bj);
         }
-#ifdef DEBUG
-        dprintf("\n");
-        for(j=0; j<k; j++){
-            dprintf("T%d (%2d)", j, pixn[j]);
-            dump_table(tables[j], ' ', ssdj[j]);
-        }
-#endif
         // check for tables with no assigned frames,
         // and assign them to the frames with the worst score
         for(j=0; j<k; j++){
@@ -402,13 +371,6 @@ static void train_tables(CyuvContext *s, int plane)
             memcpy(s->deltas[plane], tables[j], 16);
             ssdsum += ssdj[j] = build_table(s, tables[j], pix[j], pixn[j], plane, w, w);
         }
-#ifdef DEBUG
-        for(j=0; j<k; j++){
-            dprintf("S%d (%2d)", j, pixn[j]);
-            dump_table(tables[j], ' ', ssdj[j]);
-        }
-        dprintf("total: %7"PRIx64"\n", ssdsum);
-#endif
         if(!memcmp(tables_bak, tables, sizeof(tables)))
             break;
     }
@@ -539,13 +501,15 @@ static int cyuv_encode_end(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec cyuv_encoder = {
-    "cyuv",
-    CODEC_TYPE_VIDEO,
-    CODEC_ID_CYUV,
-    sizeof(CyuvContext),
-    cyuv_encode_init,
-    cyuv_encode_frame,
-    cyuv_encode_end,
-    .pix_fmts= (enum PixelFormat[]){PIX_FMT_YUV411P, -1},
+AVCodec ff_cyuv_encoder = {
+    .name           = "cyuv",
+    .type           = AVMEDIA_TYPE_VIDEO,
+    .id             = CODEC_ID_CYUV,
+    .priv_data_size = sizeof(CyuvContext),
+    .init           = cyuv_encode_init,
+    .encode         = cyuv_encode_frame,
+    .close          = cyuv_encode_end,
+    .pix_fmts       = (const enum PixelFormat[]) { PIX_FMT_YUV411P,
+                                                   PIX_FMT_NONE },
+    .long_name      = NULL_IF_CONFIG_SMALL("Creative YUV (CYUV)")
 };
