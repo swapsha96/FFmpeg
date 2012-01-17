@@ -509,6 +509,7 @@ OBJS-$(CONFIG_XBIN_DECODER)            += bintext.o cga_data.o
 OBJS-$(CONFIG_XBM_DECODER)             += xbmdec.o
 OBJS-$(CONFIG_XBM_ENCODER)             += xbmenc.o
 OBJS-$(CONFIG_XL_DECODER)              += xl.o
+OBJS-$(CONFIG_XPM_ENCODER)             += xpmenc.o
 OBJS-$(CONFIG_XSUB_DECODER)            += xsubdec.o
 OBJS-$(CONFIG_XSUB_ENCODER)            += xsubenc.o
 OBJS-$(CONFIG_XWD_DECODER)             += xwddec.o

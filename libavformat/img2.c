@@ -73,6 +73,7 @@ static const IdStrMap img_tags[] = {
     { CODEC_ID_EXR       , "exr"},
     { CODEC_ID_PICTOR    , "pic"},
     { CODEC_ID_XBM       , "xbm"},
+    { CODEC_ID_XPM       , "xpm"},
     { CODEC_ID_XWD       , "xwd"},
     { CODEC_ID_NONE      , NULL}
 };
