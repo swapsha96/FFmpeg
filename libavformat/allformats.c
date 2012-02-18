@@ -139,6 +139,7 @@ void av_register_all(void)
     REGISTER_MUXDEMUX (MLP, mlp);
     REGISTER_DEMUXER  (MM, mm);
     REGISTER_MUXDEMUX (MMF, mmf);
+    REGISTER_DEMUXER  (MNG, mng);
     REGISTER_MUXDEMUX (MOV, mov);
     REGISTER_MUXER    (MP2, mp2);
     REGISTER_MUXDEMUX (MP3, mp3);
