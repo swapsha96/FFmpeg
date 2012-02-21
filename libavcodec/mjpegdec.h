@@ -50,6 +50,10 @@ typedef struct MJpegDecodeContext {
     VLC vlcs[3][4];
     int qscale[4];      ///< quantizer scale calculated from quant_matrixes
 
+    uint8_t arith_dc_L[16];
+    uint8_t arith_dc_U[16];
+    uint8_t arith_ac_K[16];
+
     int org_height;  /* size given at codec init */
     int first_picture;    /* true if decoding first picture */
     int interlaced;     /* true if interlaced */
@@ -57,6 +61,7 @@ typedef struct MJpegDecodeContext {
     int lossless;
     int ls;
     int progressive;
+    int arith;
     int rgb;
     int upscale_h;
     int chroma_height;

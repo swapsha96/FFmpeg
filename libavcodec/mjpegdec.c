@@ -152,6 +152,42 @@ int ff_mjpeg_decode_dqt(MJpegDecodeContext *s)
     return 0;
 }
 
+static int mjpeg_decode_dac(MJpegDecodeContext *s)
+{
+    int len, index, value;
+
+    len = get_bits(&s->gb, 16) - 2;
+
+    while (len > 0) {
+        index = get_bits(&s->gb, 8);
+        value = get_bits(&s->gb, 8);
+        len -= 2;
+
+        if (index < 0 || index >= (2 * 16)) {
+            av_log(s->avctx, AV_LOG_ERROR, "dac: invalid index %d\n", index);
+            return -1;
+        }
+
+        if (index >= 16) {
+            s->arith_ac_K[index - 16] = value;
+        } else {
+            s->arith_dc_L[index] = value & 0x0F;
+            s->arith_dc_U[index] = value >> 4;
+            if (s->arith_dc_L[index] > s->arith_dc_U[index]) {
+                av_log(s->avctx, AV_LOG_ERROR, "dac: invalid value 0x%x\n", value);
+                return -1;
+            }
+        }
+    }
+
+    if (len != 0) {
+        av_log(s->avctx, AV_LOG_ERROR, "dac: invalid length\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 /* decode huffman tables and build VLC decoders */
 int ff_mjpeg_decode_dht(MJpegDecodeContext *s)
 {
@@ -1630,6 +1666,12 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *data_size,
             case DQT:
                 ff_mjpeg_decode_dqt(s);
                 break;
+            case DAC:
+                if (mjpeg_decode_dac(s) < 0) {
+                    av_log(avctx, AV_LOG_ERROR, "arithmetic coding error\n");
+                    return -1;
+                }
+                break;
             case DHT:
                 if (ff_mjpeg_decode_dht(s) < 0) {
                     av_log(avctx, AV_LOG_ERROR, "huffman table decode error\n");
@@ -1641,6 +1683,7 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *data_size,
                 s->lossless    = 0;
                 s->ls          = 0;
                 s->progressive = 0;
+                s->arith       = 0;
                 if (ff_mjpeg_decode_sof(s) < 0)
                     return -1;
                 break;
@@ -1648,6 +1691,7 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *data_size,
                 s->lossless    = 0;
                 s->ls          = 0;
                 s->progressive = 1;
+                s->arith       = 0;
                 if (ff_mjpeg_decode_sof(s) < 0)
                     return -1;
                 break;
@@ -1655,6 +1699,21 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *data_size,
                 s->lossless    = 1;
                 s->ls          = 0;
                 s->progressive = 0;
+                s->arith       = 0;
+                if (ff_mjpeg_decode_sof(s) < 0)
+                    return -1;
+                break;
+            case SOF9:
+                s->lossless    = 0;
+                s->progressive = 0;
+                s->arith       = 1;
+                if (ff_mjpeg_decode_sof(s) < 0)
+                    return -1;
+                break;
+            case SOF10:
+                s->lossless    = 0;
+                s->progressive = 1;
+                s->arith       = 1;
                 if (ff_mjpeg_decode_sof(s) < 0)
                     return -1;
                 break;
@@ -1662,6 +1721,7 @@ int ff_mjpeg_decode_frame(AVCodecContext *avctx, void *data, int *data_size,
                 s->lossless    = 1;
                 s->ls          = 1;
                 s->progressive = 0;
+                s->arith       = 0;
                 if (ff_mjpeg_decode_sof(s) < 0)
                     return -1;
                 break;
@@ -1712,8 +1772,6 @@ eoi_parser:
             case SOF5:
             case SOF6:
             case SOF7:
-            case SOF9:
-            case SOF10:
             case SOF11:
             case SOF13:
             case SOF14:
