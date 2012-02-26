@@ -168,7 +168,7 @@ static void calc_predictor_params(AlacEncodeContext *s, int ch)
                                       s->max_prediction_order,
                                       ALAC_MAX_LPC_PRECISION, coefs, shift,
                                       FF_LPC_TYPE_LEVINSON, 0,
-                                      ORDER_METHOD_EST, ALAC_MAX_LPC_SHIFT, 1);
+                                      ORDER_METHOD_EST, 0, ALAC_MAX_LPC_SHIFT, 1);
 
         s->lpc[ch].lpc_order = opt_order;
         s->lpc[ch].lpc_quant = shift[opt_order-1];

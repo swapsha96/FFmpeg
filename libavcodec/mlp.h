@@ -76,6 +76,9 @@ typedef struct FilterParams {
     uint8_t     shift; ///< Right shift to apply to output of filter.
 
     int32_t     state[MAX_FIR_ORDER];
+
+    int         coeff_bits;
+    int         coeff_shift;
 } FilterParams;
 
 /** sample data coding information */
