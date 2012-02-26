@@ -338,7 +338,7 @@ void avcodec_register_all(void)
     REGISTER_DECODER(IMC,               imc);
     REGISTER_DECODER(MACE3,             mace3);
     REGISTER_DECODER(MACE6,             mace6);
-    REGISTER_DECODER(MLP,               mlp);
+    REGISTER_ENCDEC (MLP,               mlp);
     REGISTER_DECODER(MP1,               mp1);
     REGISTER_DECODER(MP1FLOAT,          mp1float);
     REGISTER_ENCDEC (MP2,               mp2);
