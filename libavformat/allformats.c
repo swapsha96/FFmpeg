@@ -131,6 +131,7 @@ void av_register_all(void)
     REGISTER_DEMUXER  (LMLM4, lmlm4);
     REGISTER_DEMUXER  (LOAS, loas);
     REGISTER_DEMUXER  (LXF, lxf);
+    REGISTER_DEMUXER  (M95, m95);
     REGISTER_MUXDEMUX (M4V, m4v);
     REGISTER_MUXER    (MD5, md5);
     REGISTER_MUXDEMUX (MATROSKA, matroska);
