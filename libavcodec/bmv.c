@@ -45,34 +45,32 @@ typedef struct BMVDecContext {
 
     uint8_t *frame, frame_base[SCREEN_WIDE * (SCREEN_HIGH + 1)];
     uint32_t pal[256];
-    const uint8_t *stream;
 } BMVDecContext;
 
-#define NEXT_BYTE(v) v = forward ? v + 1 : v - 1;
+#define NEXT_BYTE() forward ? bytestream2_seek(gb,  1, SEEK_CUR) \
+                            : bytestream2_seek(gb, -1, SEEK_CUR);
 
-static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, int frame_off)
+static int decode_bmv_frame(GetByteContext *gb, uint8_t *frame, int frame_off)
 {
     int val, saved_val = 0;
-    int tmplen = src_len;
-    const uint8_t *src, *source_end = source + src_len;
     uint8_t *frame_end = frame + SCREEN_WIDE * SCREEN_HIGH;
     uint8_t *dst, *dst_end;
-    int len, mask;
+    int tmplen, len, mask, start;
     int forward = (frame_off <= -SCREEN_WIDE) || (frame_off >= 0);
     int read_two_nibbles, flag;
     int advance_mode;
     int mode = 0;
     int i;
 
-    if (src_len <= 0)
+    if ((tmplen = bytestream2_get_bytes_left(gb)) <= 0)
         return -1;
 
+    start = bytestream2_tell(gb);
     if (forward) {
-        src = source;
         dst = frame;
         dst_end = frame_end;
     } else {
-        src = source + src_len - 1;
+        bytestream2_seek(gb, -1, SEEK_END);
         dst = frame_end - 1;
         dst_end = frame - 1;
     }
@@ -88,9 +86,10 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
          * Hence this convoluted loop.
          */
         if (!mode || (tmplen == 4)) {
-            if (src < source || src >= source_end)
+            if (bytestream2_get_bytes_left(gb) <= 0 ||
+                bytestream2_tell(gb) < start)
                 return -1;
-            val = *src;
+            val = bytestream2_peek_byte(gb);
             read_two_nibbles = 1;
         } else {
             val = saved_val;
@@ -99,11 +98,12 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
         if (!(val & 0xC)) {
             for (;;) {
                 if (!read_two_nibbles) {
-                    if (src < source || src >= source_end)
+                    if (bytestream2_get_bytes_left(gb) <= 0 ||
+                        bytestream2_tell(gb) < start)
                         return -1;
                     shift += 2;
-                    val |= *src << shift;
-                    if (*src & 0xC)
+                    val |= bytestream2_peek_byte(gb) << shift;
+                    if (bytestream2_peek_byte(gb) & 0xC)
                         break;
                 }
                 // two upper bits of the nibble is zero,
@@ -112,7 +112,7 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
                 shift += 2;
                 mask = (1 << shift) - 1;
                 val = ((val >> 2) & ~mask) | (val & mask);
-                NEXT_BYTE(src);
+                NEXT_BYTE();
                 if ((val & (0xC << shift))) {
                     flag = 1;
                     break;
@@ -127,7 +127,7 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
             saved_val = val >> (4 + shift);
             tmplen = 0;
             val &= (1 << (shift + 4)) - 1;
-            NEXT_BYTE(src);
+            NEXT_BYTE();
         }
         advance_mode = val & 1;
         len = (val >> 1) - 1;
@@ -156,17 +156,17 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
             break;
         case 2:
             if (forward) {
-                if (source + src_len - src < len)
+                if (bytestream2_get_bytes_left(gb) <= 0)
                     return -1;
-                memcpy(dst, src, len);
+                bytestream2_get_buffer(gb, dst, len);
                 dst += len;
-                src += len;
             } else {
-                if (src - source < len)
+                if (bytestream2_tell(gb) < len + start)
                     return -1;
                 dst -= len;
-                src -= len;
-                memcpy(dst, src, len);
+                bytestream2_seek(gb, -len, SEEK_CUR);
+                bytestream2_get_buffer(gb, dst, len);
+                bytestream2_seek(gb, -len, SEEK_CUR);
             }
             break;
         case 3:
@@ -191,49 +191,50 @@ static int decode_bmv_frame(const uint8_t *source, int src_len, uint8_t *frame, 
 static int decode_frame(AVCodecContext *avctx, void *data, int *data_size, AVPacket *pkt)
 {
     BMVDecContext * const c = avctx->priv_data;
+    GetByteContext gb;
     int type, scr_off;
     int i;
     uint8_t *srcptr, *outptr;
 
-    c->stream = pkt->data;
-    type = bytestream_get_byte(&c->stream);
+    bytestream2_init(&gb, pkt->data, pkt->size);
+    type = bytestream2_get_byte(&gb);
     if (type & BMV_AUDIO) {
-        int blobs = bytestream_get_byte(&c->stream);
+        int blobs = bytestream2_get_byte(&gb);
         if (pkt->size < blobs * 65 + 2) {
             av_log(avctx, AV_LOG_ERROR, "Audio data doesn't fit in frame\n");
             return AVERROR_INVALIDDATA;
         }
-        c->stream += blobs * 65;
+        bytestream2_skip(&gb, blobs * 65);
     }
     if (type & BMV_COMMAND) {
         int command_size = (type & BMV_PRINT) ? 8 : 10;
-        if (c->stream - pkt->data + command_size > pkt->size) {
+        if (bytestream2_tell(&gb) + command_size > pkt->size) {
             av_log(avctx, AV_LOG_ERROR, "Command data doesn't fit in frame\n");
             return AVERROR_INVALIDDATA;
         }
-        c->stream += command_size;
+        bytestream2_skip(&gb, command_size);
     }
     if (type & BMV_PALETTE) {
-        if (c->stream - pkt->data > pkt->size - 768) {
+        if (bytestream2_get_bytes_left(&gb) < 768) {
             av_log(avctx, AV_LOG_ERROR, "Palette data doesn't fit in frame\n");
             return AVERROR_INVALIDDATA;
         }
         for (i = 0; i < 256; i++)
-            c->pal[i] = 0xFF << 24 | bytestream_get_be24(&c->stream);
+            c->pal[i] = 0xFF << 24 | bytestream2_get_be24(&gb);
     }
     if (type & BMV_SCROLL) {
-        if (c->stream - pkt->data > pkt->size - 2) {
+        if (bytestream2_tell(&gb) > pkt->size - 2) {
             av_log(avctx, AV_LOG_ERROR, "Screen offset data doesn't fit in frame\n");
             return AVERROR_INVALIDDATA;
         }
-        scr_off = (int16_t)bytestream_get_le16(&c->stream);
+        scr_off = (int16_t)bytestream2_get_le16(&gb);
     } else if ((type & BMV_INTRA) == BMV_INTRA) {
         scr_off = -640;
     } else {
         scr_off = 0;
     }
 
-    if (decode_bmv_frame(c->stream, pkt->size - (c->stream - pkt->data), c->frame, scr_off)) {
+    if (decode_bmv_frame(&gb, c->frame, scr_off)) {
         av_log(avctx, AV_LOG_ERROR, "Error decoding frame data\n");
         return AVERROR_INVALIDDATA;
     }
