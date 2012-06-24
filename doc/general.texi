@@ -422,7 +422,7 @@ following image formats are supported:
     @tab Targa (.TGA) image format
 @item XBM  @tab X @tab X
     @tab X BitMap image format
-@item XPM  @tab X @tab
+@item XPM  @tab X @tab X
     @tab X PixMap image format
 @item XWD  @tab X @tab X
     @tab X Window Dump image format
