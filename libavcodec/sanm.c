@@ -404,6 +404,8 @@ static int old_codec37(SANMVideoContext *ctx, int top,
     int compr, mvoff, seq, flags;
     uint32_t decoded_size;
     uint8_t *dst, *prev;
+    uint32_t pitches[16];
+    int len = -1, filling = 0, skip_code = 0, code = 0;
 
     compr        = bytestream2_get_byte(&ctx->gb);
     mvoff        = bytestream2_get_byte(&ctx->gb);
@@ -425,7 +427,7 @@ static int old_codec37(SANMVideoContext *ctx, int top,
         av_log(ctx->avctx, AV_LOG_ERROR, "invalid motion base value %d\n", mvoff);
         return AVERROR_INVALIDDATA;
     }
-    av_dlog(ctx->avctx, "compression %d\n", compr);
+    av_dlog(ctx->avctx, "compression %d flags %d\n", compr, flags);
     switch (compr) {
     case 0:
         for (i = 0; i < height; i++) {
@@ -434,6 +436,69 @@ static int old_codec37(SANMVideoContext *ctx, int top,
         }
         memset(ctx->frm1, 0, ctx->height * stride);
         memset(ctx->frm2, 0, ctx->height * stride);
+        break;
+    case 1:
+        j = 0;
+        k = 0;
+        for (i = 0; i < 16; i++)
+            pitches[i] = (i >> 2) * stride + (i & 0x3);
+        while (1) {
+            int mx, my;
+
+            if (len < 0) {
+                filling = bytestream2_get_byte(&ctx->gb);
+                len     = filling >> 1;
+                filling = (filling & 1) == 1;
+                skip_code = 0;
+            } else {
+                skip_code = 1;
+            }
+            if (!filling || !skip_code) {
+                code = bytestream2_get_byte(&ctx->gb);
+                if (code == 0xFF) {
+                    --len;
+                    for (i = 0; i < 16; i++) {
+                        if (len < 0) {
+                            filling = bytestream2_get_byte(&ctx->gb);
+                            len     = filling >> 1;
+                            filling = (filling & 1) == 1;
+                            if (filling)
+                                code = bytestream2_get_byte(&ctx->gb);
+                        }
+                        if (filling);
+//                            *(dst + pitches[i]) = code;
+                        else
+//                            *(dst + pitches[i]) =
+                              bytestream2_get_byte(&ctx->gb);
+                        --len;
+                    }
+                    dst  += 4;
+                    prev += 4;
+                    j    += 4;
+                    if (j == width) {
+                        dst  += stride * 4;
+                        prev += stride * 4;
+                        k += 4;
+                        if (k == height) return 0;
+                        j = 0;
+                    }
+                    continue;
+                }
+            }
+            mx = c37_mv[(mvoff * 255 + code) * 2    ];
+            my = c37_mv[(mvoff * 255 + code) * 2 + 1];
+            codec37_mv(dst + j, prev + j + mx + my * stride, ctx->height,
+                       stride, j + mx, k + my);
+            j += 4;
+            if (j == width) {
+                dst  += stride * 4;
+                prev += stride * 4;
+                k += 4;
+                if (k == height) return 0;
+                j = 0;
+            }
+            --len;
+        }
         break;
     case 2:
         if (rle_decode(ctx, dst, decoded_size))
@@ -446,7 +511,6 @@ static int old_codec37(SANMVideoContext *ctx, int top,
         if (flags & 4) {
             for (j = 0; j < height; j += 4) {
                 for (i = 0; i < width; i += 4) {
-                    int code;
                     if (skip_run) {
                         skip_run--;
                         for (k = 0; k < 4; k++)
@@ -480,9 +544,8 @@ static int old_codec37(SANMVideoContext *ctx, int top,
                         if (compr == 4 && !code) {
                             if (bytestream2_get_bytes_left(&ctx->gb) < 1)
                                 return AVERROR_INVALIDDATA;
-                            skip_run = bytestream2_get_byteu(&ctx->gb);
-                            for (k = 0; k < 4; k++)
-                                memcpy(dst + i + k * stride, prev + i + k * stride, 4);
+                            skip_run = bytestream2_get_byteu(&ctx->gb) + 1;
+                            i -= 4;
                         } else {
                             int mx, my;
 
@@ -499,7 +562,6 @@ static int old_codec37(SANMVideoContext *ctx, int top,
         } else {
             for (j = 0; j < height; j += 4) {
                 for (i = 0; i < width; i += 4) {
-                    int code;
                     if (skip_run) {
                         skip_run--;
                         for (k = 0; k < 4; k++)
