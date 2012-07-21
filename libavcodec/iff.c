@@ -42,6 +42,7 @@ typedef struct {
     AVFrame frame;
     int planesize;
     uint8_t * planebuf;
+    int       planebuf_size;
     uint8_t * ham_buf;      ///< temporary buffer for planar to chunky conversation
     uint32_t *ham_palbuf;   ///< HAM decode table
     uint32_t *mask_buf;     ///< temporary buffer for palette indices
@@ -52,7 +53,6 @@ typedef struct {
     unsigned  flags;        ///< 1 for EHB, 0 is no extra half darkening
     unsigned  transparency; ///< TODO: transparency color index in palette
     unsigned  masking;      ///< TODO: masking method used
-    int init; // 1 if buffer and palette data already initialized, 0 otherwise
 } IffContext;
 
 #define LUT8_PART(plane, v)                             \
@@ -135,22 +135,28 @@ static av_always_inline uint32_t gray2rgb(const uint32_t x) {
 }
 
 /**
- * Convert CMAP buffer (stored in extradata) to lavc palette format
+ * Convert CMAP buffer (stored in packet side data) to lavc palette format
  */
-static int ff_cmap_read_palette(AVCodecContext *avctx, uint32_t *pal)
+static int ff_cmap_read_palette(AVCodecContext *avctx, AVPacket *avpkt, uint32_t *pal)
 {
     IffContext *s = avctx->priv_data;
     int count, i;
-    const uint8_t *const palette = avctx->extradata + AV_RB16(avctx->extradata);
-    int palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
+    const uint8_t *palette;
+    int palette_size;
 
+    if (avpkt->side_data_elems <= 0 ||
+        avpkt->side_data[0].type != AV_PKT_DATA_PALETTE)
+        return 0;
+
+    palette      = avpkt->side_data[0].data;
+    palette_size = avpkt->side_data[0].size;
     if (avctx->bits_per_coded_sample > 8) {
         av_log(avctx, AV_LOG_ERROR, "bits_per_coded_sample > 8 not supported\n");
         return AVERROR_INVALIDDATA;
     }
 
     count = 1 << avctx->bits_per_coded_sample;
-    // If extradata is smaller than actually needed, fill the remaining with black.
+    // If palette_size is smaller than actually needed, fill the remaining with black.
     count = FFMIN(palette_size / 3, count);
     if (count) {
         for (i=0; i < count; i++) {
@@ -187,49 +193,54 @@ static int ff_cmap_read_palette(AVCodecContext *avctx, uint32_t *pal)
  * @return 0 in case of success, a negative error code otherwise
  */
 static int extract_header(AVCodecContext *const avctx,
-                          const AVPacket *const avpkt) {
-    const uint8_t *buf;
+                          const AVPacket *const avpkt)
+{
+    const uint8_t *palette;
     unsigned buf_size;
     IffContext *s = avctx->priv_data;
-    int palette_size;
+    int palette_size = 0;
+    GetByteContext gb;
 
-    if (avctx->extradata_size < 2) {
-        av_log(avctx, AV_LOG_ERROR, "not enough extradata\n");
+    s->planesize = FFALIGN(avctx->width, 16) >> 3; // Align plane size in bits to word-boundary
+    av_fast_padded_malloc(&s->planebuf, &s->planebuf_size, s->planesize + FF_INPUT_BUFFER_PADDING_SIZE);
+    if (!s->planebuf)
+        return AVERROR(ENOMEM);
+
+    s->bpp = avctx->bits_per_coded_sample;
+    if (avpkt->size < 2)
+        return AVERROR_INVALIDDATA;
+
+    if (avpkt->side_data_elems > 0 &&
+        avpkt->side_data[0].type == AV_PKT_DATA_PALETTE) {
+        palette_size = avpkt->side_data[0].size;
+        palette      = avpkt->side_data[0].data;
+    }
+
+    if (avctx->bits_per_coded_sample <= 8) {
+        avctx->pix_fmt = avctx->bits_per_coded_sample < 8 ||
+                         palette_size ? PIX_FMT_PAL8 : PIX_FMT_GRAY8;
+    } else if (avctx->bits_per_coded_sample <= 32) {
+        if (avctx->codec_tag != MKTAG('D','E','E','P'))
+            avctx->pix_fmt = PIX_FMT_BGR32;
+    } else {
         return AVERROR_INVALIDDATA;
     }
-    palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
 
-    if (avpkt) {
-        int image_size;
-        if (avpkt->size < 2)
-            return AVERROR_INVALIDDATA;
-        image_size = avpkt->size - AV_RB16(avpkt->data);
-        buf = avpkt->data;
-        buf_size = bytestream_get_be16(&buf);
-        if (buf_size <= 1 || image_size <= 1) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "Invalid image size received: %u -> image data offset: %d\n",
-                   buf_size, image_size);
-            return AVERROR_INVALIDDATA;
-        }
-    } else {
-        buf = avctx->extradata;
-        buf_size = bytestream_get_be16(&buf);
-        if (buf_size <= 1 || palette_size < 0) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "Invalid palette size received: %u -> palette data offset: %d\n",
-                   buf_size, palette_size);
-            return AVERROR_INVALIDDATA;
-        }
+    bytestream2_init(&gb, avctx->extradata, avctx->extradata_size);
+    buf_size = bytestream2_get_be16(&gb);
+    if (buf_size <= 1) {
+        av_log(avctx, AV_LOG_ERROR,
+               "Invalid image size received: %u\n", buf_size);
+        return AVERROR_INVALIDDATA;
     }
 
     if (buf_size > 8) {
-        s->compression  = bytestream_get_byte(&buf);
-        s->bpp          = bytestream_get_byte(&buf);
-        s->ham          = bytestream_get_byte(&buf);
-        s->flags        = bytestream_get_byte(&buf);
-        s->transparency = bytestream_get_be16(&buf);
-        s->masking      = bytestream_get_byte(&buf);
+        s->compression  = bytestream2_get_byte(&gb);
+        s->bpp          = bytestream2_get_byte(&gb);
+        s->ham          = bytestream2_get_byte(&gb);
+        s->flags        = bytestream2_get_byte(&gb);
+        s->transparency = bytestream2_get_be16(&gb);
+        s->masking      = bytestream2_get_byte(&gb);
         if (s->masking == MASK_HAS_MASK) {
             if (s->bpp >= 8) {
                 avctx->pix_fmt = PIX_FMT_RGB32;
@@ -268,7 +279,6 @@ static int extract_header(AVCodecContext *const avctx,
         if (s->ham) {
             int i, count = FFMIN(palette_size / 3, 1 << s->ham);
             int ham_count;
-            const uint8_t *const palette = avctx->extradata + AV_RB16(avctx->extradata);
 
             s->ham_buf = av_malloc((s->planesize * 8) + FF_INPUT_BUFFER_PADDING_SIZE);
             if (!s->ham_buf)
@@ -318,36 +328,8 @@ static int extract_header(AVCodecContext *const avctx,
 static av_cold int decode_init(AVCodecContext *avctx)
 {
     IffContext *s = avctx->priv_data;
-    int err;
 
-    if (avctx->bits_per_coded_sample <= 8) {
-        int palette_size;
-
-        if (avctx->extradata_size >= 2)
-            palette_size = avctx->extradata_size - AV_RB16(avctx->extradata);
-        else
-            palette_size = 0;
-        avctx->pix_fmt = (avctx->bits_per_coded_sample < 8) ||
-                         (avctx->extradata_size >= 2 && palette_size) ? PIX_FMT_PAL8 : PIX_FMT_GRAY8;
-    } else if (avctx->bits_per_coded_sample <= 32) {
-        if (avctx->codec_tag != MKTAG('D','E','E','P'))
-            avctx->pix_fmt = PIX_FMT_BGR32;
-    } else {
-        return AVERROR_INVALIDDATA;
-    }
-
-    if ((err = av_image_check_size(avctx->width, avctx->height, 0, avctx)))
-        return err;
-    s->planesize = FFALIGN(avctx->width, 16) >> 3; // Align plane size in bits to word-boundary
-    s->planebuf = av_malloc(s->planesize + FF_INPUT_BUFFER_PADDING_SIZE);
-    if (!s->planebuf)
-        return AVERROR(ENOMEM);
-
-    s->bpp = avctx->bits_per_coded_sample;
     avcodec_get_frame_defaults(&s->frame);
-
-    if ((err = extract_header(avctx, NULL)) < 0)
-        return err;
     s->frame.reference = 3;
 
     return 0;
@@ -472,27 +454,22 @@ static int decode_frame_ilbm(AVCodecContext *avctx,
                             AVPacket *avpkt)
 {
     IffContext *s = avctx->priv_data;
-    const uint8_t *buf = avpkt->size >= 2 ? avpkt->data + AV_RB16(avpkt->data) : NULL;
-    const int buf_size = avpkt->size >= 2 ? avpkt->size - AV_RB16(avpkt->data) : 0;
+    const uint8_t *buf = avpkt->data;
+    const int buf_size = avpkt->size;
     const uint8_t *buf_end = buf+buf_size;
     int y, plane, res;
 
     if ((res = extract_header(avctx, avpkt)) < 0)
         return res;
 
-    if (s->init) {
-        if ((res = avctx->reget_buffer(avctx, &s->frame)) < 0) {
-            av_log(avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
-            return res;
-        }
-    } else if ((res = avctx->get_buffer(avctx, &s->frame)) < 0) {
-        av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+    if ((res = avctx->reget_buffer(avctx, &s->frame)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
         return res;
-    } else if (avctx->bits_per_coded_sample <= 8 && avctx->pix_fmt == PIX_FMT_PAL8) {
-        if ((res = ff_cmap_read_palette(avctx, (uint32_t*)s->frame.data[1])) < 0)
+    }
+    if (avctx->bits_per_coded_sample <= 8 && avctx->pix_fmt == PIX_FMT_PAL8) {
+        if ((res = ff_cmap_read_palette(avctx, avpkt, (uint32_t*)s->frame.data[1])) < 0)
             return res;
     }
-    s->init = 1;
 
     if (avctx->codec_tag == MKTAG('A','C','B','M')) {
         if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
@@ -590,31 +567,36 @@ static int decode_frame_byterun1(AVCodecContext *avctx,
                             AVPacket *avpkt)
 {
     IffContext *s = avctx->priv_data;
-    const uint8_t *buf = avpkt->size >= 2 ? avpkt->data + AV_RB16(avpkt->data) : NULL;
-    const int buf_size = avpkt->size >= 2 ? avpkt->size - AV_RB16(avpkt->data) : 0;
+    const uint8_t *buf = avpkt->data;
+    const int buf_size = avpkt->size;
     const uint8_t *buf_end = buf+buf_size;
     int y, plane, res;
 
     if ((res = extract_header(avctx, avpkt)) < 0)
         return res;
-    if (s->init) {
-        if ((res = avctx->reget_buffer(avctx, &s->frame)) < 0) {
-            av_log(avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
-            return res;
-        }
-    } else if ((res = avctx->get_buffer(avctx, &s->frame)) < 0) {
-        av_log(avctx, AV_LOG_ERROR, "get_buffer() failed\n");
+
+    if ((res = avctx->reget_buffer(avctx, &s->frame)) < 0) {
+        av_log(avctx, AV_LOG_ERROR, "reget_buffer() failed\n");
         return res;
-    } else if (avctx->pix_fmt == PIX_FMT_PAL8) {
-        if ((res = ff_cmap_read_palette(avctx, (uint32_t*)s->frame.data[1])) < 0)
+    }
+    if (avctx->pix_fmt == PIX_FMT_PAL8) {
+        if ((res = ff_cmap_read_palette(avctx, avpkt, (uint32_t*)s->frame.data[1])) < 0)
             return res;
     } else if (avctx->pix_fmt == PIX_FMT_RGB32 && avctx->bits_per_coded_sample <= 8) {
-        if ((res = ff_cmap_read_palette(avctx, s->mask_palbuf)) < 0)
+        if ((res = ff_cmap_read_palette(avctx, avpkt, s->mask_palbuf)) < 0)
             return res;
     }
-    s->init = 1;
 
-    if (avctx->codec_tag == MKTAG('I','L','B','M')) { //interleaved
+    if (!(avpkt->flags & AV_PKT_FLAG_KEY)) {
+        if (avpkt->size < 40)
+            return AVERROR_INVALIDDATA;
+
+        switch (*buf) {
+        default:
+            av_log(avctx, AV_LOG_ERROR, "unsupported delta compression %d\n", *buf);
+            return AVERROR_PATCHWELCOME;
+        }
+    } else if (avctx->codec_tag == MKTAG('I','L','B','M')) { //interleaved
         if (avctx->pix_fmt == PIX_FMT_PAL8 || avctx->pix_fmt == PIX_FMT_GRAY8) {
             for(y = 0; y < avctx->height ; y++ ) {
                 uint8_t *row = &s->frame.data[0][ y*s->frame.linesize[0] ];

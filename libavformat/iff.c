@@ -61,6 +61,9 @@
 #define ID_BODY       MKTAG('B','O','D','Y')
 #define ID_DBOD       MKTAG('D','B','O','D')
 #define ID_DPEL       MKTAG('D','P','E','L')
+#define ID_ANIM       MKTAG('A','N','I','M')
+#define ID_ANHD       MKTAG('A','N','H','D')
+#define ID_DLTA       MKTAG('D','L','T','A')
 
 #define LEFT    2
 #define RIGHT   4
@@ -70,9 +73,7 @@
  * This number of bytes if added at the beginning of each AVPacket
  * which contain additional information about video properties
  * which has to be shared between demuxer and decoder.
- * This number may change between frames, e.g. the demuxer might
- * set it to smallest possible size of 2 to indicate that there's
- * no extradata changing in this frame.
+ * This number may change between frames.
  */
 #define IFF_EXTRA_VIDEO_SIZE 9
 
@@ -88,16 +89,10 @@ typedef enum {
 } bitmap_compression_type;
 
 typedef struct {
-    uint64_t  body_pos;
-    uint32_t  body_size;
-    uint32_t  sent_bytes;
-    svx8_compression_type   svx8_compression;
-    bitmap_compression_type bitmap_compression;  ///< delta compression method used
-    unsigned  bpp;          ///< bits per plane to decode (differs from bits_per_coded_sample if HAM)
-    unsigned  ham;          ///< 0 if non-HAM or number of hold bits (6 for bpp > 6, 4 otherwise)
-    unsigned  flags;        ///< 1 for EHB, 0 is no extra half darkening
-    unsigned  transparency; ///< transparency color index in palette
-    unsigned  masking;      ///< masking method used
+    int       tag;
+    uint32_t  form_size;
+    uint8_t   *palette;
+    int       palette_size;
 } IffDemuxContext;
 
 /* Metadata string read */
@@ -119,6 +114,16 @@ static int get_metadata(AVFormatContext *s,
     return 0;
 }
 
+static int create_stream(AVFormatContext *s, AVStream **st)
+{
+    if (*st)
+        return AVERROR_INVALIDDATA;
+    *st = avformat_new_stream(s, NULL);
+    if (!*st)
+        return AVERROR(ENOMEM);
+    return 0;
+}
+
 static int iff_probe(AVProbeData *p)
 {
     const uint8_t *d = p->buf;
@@ -127,6 +132,7 @@ static int iff_probe(AVProbeData *p)
          (AV_RL32(d+8) == ID_8SVX ||
           AV_RL32(d+8) == ID_PBM  ||
           AV_RL32(d+8) == ID_ACBM ||
+          AV_RL32(d+8) == ID_ANIM ||
           AV_RL32(d+8) == ID_DEEP ||
           AV_RL32(d+8) == ID_ILBM) )
         return AVPROBE_SCORE_MAX;
@@ -140,127 +146,202 @@ static int iff_read_header(AVFormatContext *s)
 {
     IffDemuxContext *iff = s->priv_data;
     AVIOContext *pb = s->pb;
-    AVStream *st;
+    s->ctx_flags |= AVFMTCTX_NOHEADER;
+
+    if (avio_rl32(pb) != ID_FORM)
+        return AVERROR_INVALIDDATA;
+    iff->form_size = avio_rb32(pb);
+
+    iff->tag = avio_rl32(pb);
+    if (iff->tag == ID_ANIM) {
+        if (avio_rl32(pb) != ID_FORM)
+            return AVERROR_INVALIDDATA;
+        iff->form_size = avio_rb32(pb);
+        iff->tag = avio_rl32(pb);
+        if (iff->tag != ID_ILBM)
+            return AVERROR_INVALIDDATA;
+    }
+
+    return 0;
+}
+
+static int iff_read_packet(AVFormatContext *s, AVPacket *pkt)
+{
+    IffDemuxContext *iff = s->priv_data;
+    AVIOContext *pb = s->pb;
+    AVStream *st = NULL;
+    bitmap_compression_type bitmap_compression;  ///< delta compression method used
+    unsigned  bpp;          ///< bits per plane to decode (differs from bits_per_coded_sample if HAM)
+    unsigned  ham;          ///< 0 if non-HAM or number of hold bits (6 for bpp > 6, 4 otherwise)
+    unsigned  flags;        ///< 1 for EHB, 0 is no extra half darkening
+    unsigned  transparency = 0; ///< transparency color index in palette
     uint8_t *buf;
-    uint32_t chunk_id, data_size;
-    uint32_t screenmode = 0;
-    unsigned transparency = 0;
+    uint32_t chunk_id, chunk_size, palette_size = 0;
+    uint64_t chunk_pos;
+    uint32_t screenmode = 0, duration = 1;
     unsigned masking = 0; // no mask
     uint8_t fmt[16];
-    int fmt_size;
+    int tag, ret, compr = 0, fmt_size, channels = 1;
 
-    st = avformat_new_stream(s, NULL);
-    if (!st)
-        return AVERROR(ENOMEM);
+    tag = iff->tag;
+    if (url_feof(pb))
+        return AVERROR_EOF;
 
-    st->codec->channels = 1;
-    avio_skip(pb, 8);
-    // codec_tag used by ByteRun1 decoder to distinguish progressive (PBM) and interlaced (ILBM) content
-    st->codec->codec_tag = avio_rl32(pb);
-
-    while(!url_feof(pb)) {
-        uint64_t orig_pos;
-        int res;
+    while (!url_feof(pb)) {
         const char *metadata_tag = NULL;
-        chunk_id = avio_rl32(pb);
-        data_size = avio_rb32(pb);
-        orig_pos = avio_tell(pb);
+
+        chunk_id   = avio_rl32(pb);
+        chunk_size = avio_rb32(pb);
+        chunk_pos  = avio_tell(pb);
 
         switch(chunk_id) {
+        case ID_FORM:
+            iff->tag = avio_rl32(pb);
+            goto done;
         case ID_VHDR:
-            st->codec->codec_type = AVMEDIA_TYPE_AUDIO;
-
-            if (data_size < 14)
+            if (chunk_size < 14)
                 return AVERROR_INVALIDDATA;
+            if ((ret = create_stream(s, &st)) < 0)
+                return ret;
+            st->codec->codec_type = AVMEDIA_TYPE_AUDIO;
             avio_skip(pb, 12);
             st->codec->sample_rate = avio_rb16(pb);
-            if (data_size >= 16) {
+            if (chunk_size >= 16) {
                 avio_skip(pb, 1);
-                iff->svx8_compression = avio_r8(pb);
+                compr = avio_r8(pb);
             }
+            switch (compr) {
+            case COMP_NONE:
+                st->codec->codec_id = CODEC_ID_PCM_S8_PLANAR;
+                break;
+            case COMP_FIB:
+                st->codec->codec_id = CODEC_ID_8SVX_FIB;
+                break;
+            case COMP_EXP:
+                st->codec->codec_id = CODEC_ID_8SVX_EXP;
+                break;
+            default:
+                av_log(s, AV_LOG_ERROR,
+                       "Unknown SVX8 compression method '%d'\n", compr);
+                return AVERROR_INVALIDDATA;
+            }
+            st->codec->bits_per_coded_sample = compr == COMP_NONE ? 8 : 4;
+            avpriv_set_pts_info(st, 32, 1, st->codec->sample_rate);
             break;
 
         case ID_ABIT:
         case ID_BODY:
         case ID_DBOD:
-            iff->body_pos = avio_tell(pb);
-            iff->body_size = data_size;
+            if (!st)
+                return AVERROR_INVALIDDATA;
+            if ((ret = av_get_packet(pb, pkt, chunk_size)) < 0)
+                return ret;
+            pkt->flags |= AV_PKT_FLAG_KEY;
+            if (st->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+                pkt->duration = FFMAX(duration, 1);
+            break;
+
+        case ID_ANHD:
+            if (chunk_size < 40 || !s->nb_streams)
+                return AVERROR_INVALIDDATA;
+            if ((ret = av_get_packet(pb, pkt, 40)) < 0)
+                return ret;
+            duration = AV_RB32(&pkt->data[14]);
+            break;
+
+        case ID_DLTA:
+            if (!s->nb_streams)
+                return AVERROR_INVALIDDATA;
+            if ((ret = av_append_packet(pb, pkt, chunk_size)) < 0)
+                return ret;
+            pkt->duration = FFMAX(duration, 1);
             break;
 
         case ID_CHAN:
-            if (data_size < 4)
+            if (chunk_size < 4)
                 return AVERROR_INVALIDDATA;
-            st->codec->channels = (avio_rb32(pb) < 6) ? 1 : 2;
+            channels = (avio_rb32(pb) < 6) ? 1 : 2;
             break;
 
         case ID_CAMG:
-            if (data_size < 4)
+            if (chunk_size < 4)
                 return AVERROR_INVALIDDATA;
-            screenmode                = avio_rb32(pb);
+            screenmode = avio_rb32(pb);
             break;
 
         case ID_CMAP:
-            st->codec->extradata_size = data_size + IFF_EXTRA_VIDEO_SIZE;
-            st->codec->extradata      = av_malloc(data_size + IFF_EXTRA_VIDEO_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
-            if (!st->codec->extradata)
+            if (chunk_size > 768)
+                return AVERROR_INVALIDDATA;
+            palette_size = chunk_size;
+            av_fast_padded_malloc(&iff->palette, &iff->palette_size, palette_size);
+            if (!iff->palette)
                 return AVERROR(ENOMEM);
-            if (avio_read(pb, st->codec->extradata + IFF_EXTRA_VIDEO_SIZE, data_size) < 0)
+            if (avio_read(pb, iff->palette, palette_size) != palette_size)
                 return AVERROR(EIO);
             break;
 
         case ID_BMHD:
-            iff->bitmap_compression = -1;
+            if ((ret = create_stream(s, &st)) < 0)
+                return ret;
+            bitmap_compression = -1;
+            st->start_time = 0;
             st->codec->codec_type            = AVMEDIA_TYPE_VIDEO;
-            if (data_size <= 8)
+            if (chunk_size <= 8)
                 return AVERROR_INVALIDDATA;
             st->codec->width                 = avio_rb16(pb);
             st->codec->height                = avio_rb16(pb);
             avio_skip(pb, 4); // x, y offset
             st->codec->bits_per_coded_sample = avio_r8(pb);
-            if (data_size >= 10)
+            if (chunk_size >= 10)
                 masking                      = avio_r8(pb);
-            if (data_size >= 11)
-                iff->bitmap_compression      = avio_r8(pb);
-            if (data_size >= 14) {
+            if (chunk_size >= 11)
+                bitmap_compression           = avio_r8(pb);
+            if (chunk_size >= 14) {
                 avio_skip(pb, 1); // padding
                 transparency                 = avio_rb16(pb);
             }
-            if (data_size >= 16) {
+            if (chunk_size >= 16) {
                 st->sample_aspect_ratio.num  = avio_r8(pb);
                 st->sample_aspect_ratio.den  = avio_r8(pb);
             }
+            avpriv_set_pts_info(st, 64, 1, 60);
             break;
 
         case ID_DPEL:
-            if (data_size < 4 || (data_size & 3))
+            if (!st)
+                return AVERROR_INVALIDDATA;
+            if (chunk_size < 16 || (chunk_size & 3))
                 return AVERROR_INVALIDDATA;
             if ((fmt_size = avio_read(pb, fmt, sizeof(fmt))) < 0)
                 return fmt_size;
-            if (fmt_size == sizeof(deep_rgb24) && !memcmp(fmt, deep_rgb24, sizeof(deep_rgb24)))
+            if (fmt_size == sizeof(deep_rgb24) && !memcmp(fmt, deep_rgb24, sizeof(deep_rgb24))) {
                 st->codec->pix_fmt = PIX_FMT_RGB24;
-            else if (fmt_size == sizeof(deep_rgba) && !memcmp(fmt, deep_rgba, sizeof(deep_rgba)))
+                st->codec->bits_per_coded_sample = 24;
+            } else if (fmt_size == sizeof(deep_rgba) && !memcmp(fmt, deep_rgba, sizeof(deep_rgba))) {
                 st->codec->pix_fmt = PIX_FMT_RGBA;
-            else {
+                st->codec->bits_per_coded_sample = 32;
+            } else {
                 av_log_ask_for_sample(s, "unsupported color format\n");
                 return AVERROR_PATCHWELCOME;
             }
             break;
 
         case ID_DGBL:
-            st->codec->codec_type            = AVMEDIA_TYPE_VIDEO;
-            if (data_size < 8)
+            if ((ret = create_stream(s, &st)) < 0)
+                return ret;
+            st->codec->codec_type       = AVMEDIA_TYPE_VIDEO;
+            if (chunk_size < 8)
                 return AVERROR_INVALIDDATA;
-            st->codec->width                 = avio_rb16(pb);
-            st->codec->height                = avio_rb16(pb);
-            iff->bitmap_compression          = avio_rb16(pb);
-            if (iff->bitmap_compression != 0) {
+            st->codec->width            = avio_rb16(pb);
+            st->codec->height           = avio_rb16(pb);
+            bitmap_compression          = avio_rb16(pb);
+            if (bitmap_compression) {
                 av_log(s, AV_LOG_ERROR,
-                       "compression %i not supported\n", iff->bitmap_compression);
+                       "compression %i not supported\n", bitmap_compression);
                 return AVERROR_PATCHWELCOME;
             }
-            st->sample_aspect_ratio.num      = avio_r8(pb);
-            st->sample_aspect_ratio.den      = avio_r8(pb);
-            st->codec->bits_per_coded_sample = 24;
+            st->sample_aspect_ratio.num = avio_r8(pb);
+            st->sample_aspect_ratio.den = avio_r8(pb);
             break;
 
         case ID_ANNO:
@@ -268,122 +349,89 @@ static int iff_read_header(AVFormatContext *s)
         case ID_AUTH:      metadata_tag = "artist";    break;
         case ID_COPYRIGHT: metadata_tag = "copyright"; break;
         case ID_NAME:      metadata_tag = "title";     break;
+        default:
+            av_log(s, AV_LOG_DEBUG, "unsupported chunk id: %X\n", chunk_id);
         }
 
         if (metadata_tag) {
-            if ((res = get_metadata(s, metadata_tag, data_size)) < 0) {
-                av_log(s, AV_LOG_ERROR, "cannot allocate metadata tag %s!", metadata_tag);
-                return res;
+            if ((ret = get_metadata(s, metadata_tag, chunk_size)) < 0) {
+                av_log(s, AV_LOG_ERROR, "cannot allocate metadata tag %s!\n", metadata_tag);
+                return ret;
             }
         }
-        avio_skip(pb, data_size - (avio_tell(pb) - orig_pos) + (data_size & 1));
+        avio_skip(pb, chunk_size - (avio_tell(pb) - chunk_pos) + (chunk_size & 1));
     }
 
-    avio_seek(pb, iff->body_pos, SEEK_SET);
+done:
+    if (!s->nb_streams || pkt->size <= 0)
+        return AVERROR_INVALIDDATA;
+    if (st) {
+        switch(st->codec->codec_type) {
+        case AVMEDIA_TYPE_AUDIO:
+            st->codec->channels = channels;
+            st->codec->bit_rate = st->codec->channels * st->codec->sample_rate * st->codec->bits_per_coded_sample;
+            st->codec->block_align = st->codec->channels * st->codec->bits_per_coded_sample;
+            break;
 
-    switch(st->codec->codec_type) {
-    case AVMEDIA_TYPE_AUDIO:
-        avpriv_set_pts_info(st, 32, 1, st->codec->sample_rate);
+        case AVMEDIA_TYPE_VIDEO:
+            bpp     = st->codec->bits_per_coded_sample;
+            if ((screenmode & 0x800 /* Hold And Modify */) && bpp <= 8) {
+                ham = bpp > 6 ? 6 : 4;
+                st->codec->bits_per_coded_sample = 24;
+            } else {
+                ham = 0;
+            }
+            flags   = (screenmode & 0x80 /* Extra HalfBrite */) && bpp <= 8;
 
-        switch (iff->svx8_compression) {
-        case COMP_NONE:
-            st->codec->codec_id = CODEC_ID_PCM_S8_PLANAR;
+            if (!st->codec->extradata) {
+                st->codec->extradata_size = IFF_EXTRA_VIDEO_SIZE;
+                st->codec->extradata      = av_malloc(IFF_EXTRA_VIDEO_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
+                if (!st->codec->extradata)
+                    return AVERROR(ENOMEM);
+            }
+            buf = st->codec->extradata;
+            bytestream_put_be16(&buf, IFF_EXTRA_VIDEO_SIZE);
+            bytestream_put_byte(&buf, bitmap_compression);
+            bytestream_put_byte(&buf, bpp);
+            bytestream_put_byte(&buf, ham);
+            bytestream_put_byte(&buf, flags);
+            bytestream_put_be16(&buf, transparency);
+            bytestream_put_byte(&buf, masking);
+            st->codec->codec_tag = tag;
+
+            if (palette_size) {
+                uint8_t *npal = av_packet_new_side_data(pkt, AV_PKT_DATA_PALETTE, palette_size);
+                if (!npal) {
+                    return AVERROR(ENOMEM);
+                }
+                memcpy(npal, iff->palette, palette_size);
+            }
+
+            switch (bitmap_compression) {
+            case BITMAP_RAW:
+                st->codec->codec_id = CODEC_ID_IFF_ILBM;
+                break;
+            case BITMAP_BYTERUN1:
+                st->codec->codec_id = CODEC_ID_IFF_BYTERUN1;
+                break;
+            default:
+                av_log(s, AV_LOG_ERROR,
+                    "Unknown bitmap compression method '%d'\n", bitmap_compression);
+                return AVERROR_INVALIDDATA;
+            }
             break;
-        case COMP_FIB:
-            st->codec->codec_id = CODEC_ID_8SVX_FIB;
-            break;
-        case COMP_EXP:
-            st->codec->codec_id = CODEC_ID_8SVX_EXP;
-            break;
-        default:
-            av_log(s, AV_LOG_ERROR,
-                   "Unknown SVX8 compression method '%d'\n", iff->svx8_compression);
-            return -1;
         }
-
-        st->codec->bits_per_coded_sample = iff->svx8_compression == COMP_NONE ? 8 : 4;
-        st->codec->bit_rate = st->codec->channels * st->codec->sample_rate * st->codec->bits_per_coded_sample;
-        st->codec->block_align = st->codec->channels * st->codec->bits_per_coded_sample;
-        break;
-
-    case AVMEDIA_TYPE_VIDEO:
-        iff->bpp          = st->codec->bits_per_coded_sample;
-        if ((screenmode & 0x800 /* Hold And Modify */) && iff->bpp <= 8) {
-            iff->ham      = iff->bpp > 6 ? 6 : 4;
-            st->codec->bits_per_coded_sample = 24;
-        }
-        iff->flags        = (screenmode & 0x80 /* Extra HalfBrite */) && iff->bpp <= 8;
-        iff->masking      = masking;
-        iff->transparency = transparency;
-
-        if (!st->codec->extradata) {
-            st->codec->extradata_size = IFF_EXTRA_VIDEO_SIZE;
-            st->codec->extradata      = av_malloc(IFF_EXTRA_VIDEO_SIZE + FF_INPUT_BUFFER_PADDING_SIZE);
-            if (!st->codec->extradata)
-                return AVERROR(ENOMEM);
-        }
-        buf = st->codec->extradata;
-        bytestream_put_be16(&buf, IFF_EXTRA_VIDEO_SIZE);
-        bytestream_put_byte(&buf, iff->bitmap_compression);
-        bytestream_put_byte(&buf, iff->bpp);
-        bytestream_put_byte(&buf, iff->ham);
-        bytestream_put_byte(&buf, iff->flags);
-        bytestream_put_be16(&buf, iff->transparency);
-        bytestream_put_byte(&buf, iff->masking);
-
-        switch (iff->bitmap_compression) {
-        case BITMAP_RAW:
-            st->codec->codec_id = CODEC_ID_IFF_ILBM;
-            break;
-        case BITMAP_BYTERUN1:
-            st->codec->codec_id = CODEC_ID_IFF_BYTERUN1;
-            break;
-        default:
-            av_log(s, AV_LOG_ERROR,
-                   "Unknown bitmap compression method '%d'\n", iff->bitmap_compression);
-            return AVERROR_INVALIDDATA;
-        }
-        break;
-    default:
-        return -1;
     }
-
-    return 0;
-}
-
-static int iff_read_packet(AVFormatContext *s,
-                           AVPacket *pkt)
-{
-    IffDemuxContext *iff = s->priv_data;
-    AVIOContext *pb = s->pb;
-    AVStream *st = s->streams[0];
-    int ret;
-
-    if(iff->sent_bytes >= iff->body_size)
-        return AVERROR_EOF;
-
-    if (st->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-        ret = av_get_packet(pb, pkt, iff->body_size);
-    } else if (st->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-        uint8_t *buf;
-
-        if (av_new_packet(pkt, iff->body_size + 2) < 0) {
-            return AVERROR(ENOMEM);
-        }
-
-        buf = pkt->data;
-        bytestream_put_be16(&buf, 2);
-        ret = avio_read(pb, buf, iff->body_size);
-    } else {
-        av_abort();
-    }
-
-    if(iff->sent_bytes == 0)
-        pkt->flags |= AV_PKT_FLAG_KEY;
-    iff->sent_bytes = iff->body_size;
 
     pkt->stream_index = 0;
-    return ret;
+    return pkt->size;
+}
+
+static int iff_read_close(AVFormatContext *s)
+{
+    IffDemuxContext *iff = s->priv_data;
+    av_freep(&iff->palette);
+    return 0;
 }
 
 AVInputFormat ff_iff_demuxer = {
@@ -393,4 +441,5 @@ AVInputFormat ff_iff_demuxer = {
     .read_probe     = iff_probe,
     .read_header    = iff_read_header,
     .read_packet    = iff_read_packet,
+    .read_close     = iff_read_close,
 };
