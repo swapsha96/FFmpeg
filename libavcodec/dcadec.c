@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "libavutil/float_dsp.h"
@@ -351,6 +352,42 @@ static av_always_inline int get_bitalloc(GetBitContext *gb, BitAlloc *ba,
            ba->offset;
 }
 
+typedef struct XllChSetSubHeader {
+    int channels;               ///< number of channels in channel set
+    int residual_encode;        ///< residual channel encoding
+    int bit_resolution;         ///< input sample bit-width
+    int bit_width;              ///< original input sample bit-width
+    int sample_rate;            ///< sampling frequency
+    int fs_interpolate;         ///< sampling frequency interpolation multiplier
+    int replacement_set;        ///< replacement channel set group
+    int active_replace_set;     ///< current channel set is active channel set
+    int primary_ch_set;         ///< is primary channel set
+    int downmix_coeffs_embeded;
+    int downmix_embeded;
+    int downmix_type;
+    int hier_ch_set;
+    int ch_mask_enabled;
+    int ch_mask;
+    int radius_delta[18];
+    int theta[18];
+    int phi[18];
+    int num_bands;
+    int ch_decor_enabled[4];
+    int orig_ch_order[4][18];
+    int ch_flag[4];
+    int ch_pairs_coeffs[4][9];
+    int hlpc_order[4];
+    int apred_order[4][18];     ///< adaptive prediction order
+    int fpred_order[4][18];     ///< fixed prediction order
+    int lpc_refl_coeffs[4][18]; ///< adaptive predictor quantized reflection coefficients
+    int scalable_lsb[4][18];
+    int bitwidth_adj[4][18];
+    int lsb_fsize[4];
+    int bits4ABIT;
+    int bits4ch_order;
+    int mapping_coeffs_present; ///< mapping coefficient present
+} XllChSetSubHeader;
+
 typedef struct {
     const AVClass *class;       ///< class for AVOptions
     AVCodecContext *avctx;
@@ -466,6 +503,17 @@ typedef struct {
     int8_t xxch_order_tab[32];
     int8_t lfe_index;
 
+    /* XLL extension information */
+    int xll_nch_sets;           ///< number of channel sets per frame
+    int xll_segments;           ///< number of segments per frame
+    int xll_smp_in_seg;         ///< samples in segment per one frequency band for the first channel set
+    int xll_bits4seg_size;      ///< number of bits used to read segment size
+    int xll_banddata_crcen;     ///< presence of CRC16 within each frequency band
+    int xll_scalable_lsb;
+    int xll_bits4ch_mask;       ///< channel position mask
+    int xll_fixed_lsb_width;
+    XllChSetSubHeader xll_chsets[16];
+
     /* ExSS header parser */
     int static_fields;          ///< static fields present
     int mix_metadata;           ///< mixing metadata present
@@ -473,6 +521,7 @@ typedef struct {
     int mix_config_num_ch[4];   ///< number of channels in each mix out configuration
 
     int profile;
+    int one2one_map_chtospkr;
 
     int debug_flag;             ///< used for suppressing repeated error messages output
     AVFloatDSPContext fdsp;
@@ -1672,7 +1721,8 @@ static int dca_exss_parse_asset_header(DCAContext *s)
         skip_bits(&s->gb, 4); // max sample rate code
         channels = get_bits(&s->gb, 8) + 1;
 
-        if (get_bits1(&s->gb)) { // 1-to-1 channels to speakers
+        s->one2one_map_chtospkr = get_bits1(&s->gb);
+        if (s->one2one_map_chtospkr) {
             int spkr_remap_sets;
             int spkr_mask_size = 16;
             int num_spkrs[7];
@@ -1995,6 +2045,153 @@ static int dca_xxch_decode_frame(DCAContext *s)
     return 0;
 }
 
+static void dca_xll_decode_ch_subset(DCAContext *s, XllChSetSubHeader *sh)
+{
+    int hdr_pos, hdr_size, i, n;
+
+    hdr_pos  = get_bits_count(&s->gb);
+    hdr_size = get_bits(&s->gb, 10) + 1;
+
+    sh->channels        = get_bits(&s->gb, 4) + 1;
+    sh->residual_encode = get_bits(&s->gb, sh->channels);
+    sh->bit_resolution  = get_bits(&s->gb, 5) + 1;
+    sh->bit_width       = get_bits(&s->gb, 5) + 1;
+    sh->sample_rate     = dca_sampling_freqs[get_bits(&s->gb, 4)];
+    sh->fs_interpolate  = get_bits(&s->gb, 2);
+    sh->replacement_set = get_bits(&s->gb, 2);
+    if (sh->replacement_set)
+        sh->active_replace_set = get_bits1(&s->gb);
+
+    if (s->one2one_map_chtospkr) {
+        sh->primary_ch_set         = get_bits1(&s->gb);
+        sh->downmix_coeffs_embeded = get_bits1(&s->gb);
+        if (sh->downmix_coeffs_embeded)
+            sh->downmix_embeded = get_bits1(&s->gb);
+        if (sh->downmix_coeffs_embeded && sh->primary_ch_set)
+            sh->downmix_type = get_bits(&s->gb, 3);
+        sh->hier_ch_set = get_bits1(&s->gb);
+        if (sh->downmix_coeffs_embeded) {
+            int nb_downmix_coeffs = (s->xll_nch_sets + 1) * (sh->channels); // XXX
+
+            for (i = 0; i < nb_downmix_coeffs; i++)
+                get_bits(&s->gb, 9); // TODO
+        }
+        sh->ch_mask_enabled = get_bits1(&s->gb);
+        if (sh->ch_mask_enabled) {
+            sh->ch_mask = get_bits64(&s->gb, s->xll_bits4ch_mask);
+        } else {
+            for (i = 0; i < sh->channels; i++) {
+                sh->radius_delta[i] = get_bits(&s->gb, 9);
+                sh->theta[i]        = get_bits(&s->gb, 9);
+                sh->phi[i]          = get_bits(&s->gb, 7);
+            }
+        }
+    } else {
+        sh->primary_ch_set = 1;
+        sh->mapping_coeffs_present = get_bits1(&s->gb);
+        // TODO
+    }
+
+    sh->num_bands = sh->sample_rate > 96000 ? 2 << get_bits1(&s->gb) : 1;
+
+    for (sh->bits4ch_order = 0, i = 1; i < sh->channels; sh->bits4ch_order++, i*=2);
+
+    sh->ch_decor_enabled[0] = get_bits1(&s->gb);
+    if (sh->ch_decor_enabled[0]) {
+        for (i = 0; i < sh->channels; i++)
+            sh->orig_ch_order[0][i] = get_bits(&s->gb, sh->bits4ch_order);
+        for (i = 0; i < (sh->channels >> 1); i++) {
+            sh->ch_flag[0] = get_bits1(&s->gb);
+            if (sh->ch_flag[0]) {
+                sh->ch_pairs_coeffs[0][i] = get_sbits(&s->gb, 7);
+            } else {
+                sh->ch_pairs_coeffs[0][i] = 0;
+            }
+        }
+    }
+
+    sh->hlpc_order[0] = 0;
+    for (i = 0; i < sh->channels; i++) {
+        sh->apred_order[0][i] = get_bits(&s->gb, 4);
+        sh->hlpc_order[0] = FFMAX(sh->hlpc_order[0], sh->apred_order[0][i]);
+    }
+
+    for (i = 0; i < sh->channels; i++)
+        sh->fpred_order[0][i] = sh->apred_order[0][i] ? 0 : get_bits(&s->gb, 2);
+
+    for (i = 0; i < sh->channels; i++) {
+        for (n = 0; n < sh->apred_order[0][i]; n++)
+            sh->lpc_refl_coeffs[0][i] = get_sbits(&s->gb, 8);
+    }
+
+    if (sh->bit_width > 16)
+        sh->bits4ABIT = 5;
+    else if (sh->bit_width > 8)
+        sh->bits4ABIT = 4;
+    else
+        sh->bits4ABIT = 3;
+
+    if (s->xll_scalable_lsb) {
+        sh->lsb_fsize[0] = get_bits64(&s->gb, s->xll_bits4seg_size);
+        for (i = 0; i < sh->channels; i++)
+            sh->scalable_lsb[0][i] = get_bits(&s->gb, 4);
+        for (i = 0; i < sh->channels; i++)
+            sh->bitwidth_adj[0][i] = get_bits(&s->gb, 4);
+    } else {
+        memset(&sh->scalable_lsb[0], 0, sh->channels * sizeof(int));
+        memset(&sh->bitwidth_adj[0], 0, sh->channels * sizeof(int));
+    }
+
+    // TODO extract extra bands
+
+    /* skip to the end of the channel set header */
+    i = get_bits_count(&s->gb);
+    av_assert0(hdr_pos + hdr_size * 8 - i >= 16);
+    if (hdr_pos + hdr_size * 8 > i)
+        skip_bits_long(&s->gb, hdr_pos + hdr_size * 8 - i);
+}
+
+/* parse initial header for XLL */
+static int dca_xll_decode_frame(DCAContext *s)
+{
+    int hdr_pos, hdr_size, version, frame_size;
+    int i, chset;
+
+    av_log(s->avctx, AV_LOG_DEBUG, "DTS-XLL: decoding XLL extension\n");
+
+    /* get bit position of sync header */
+    hdr_pos = get_bits_count(&s->gb) - 32;
+
+    version  = get_bits(&s->gb, 4) + 1;
+    hdr_size = get_bits(&s->gb, 8) + 1;
+
+    frame_size = get_bits_long(&s->gb, get_bits(&s->gb, 5) + 1) + 1;
+
+    s->xll_nch_sets       = get_bits(&s->gb, 4) + 1;
+    s->xll_segments       = 1 << get_bits(&s->gb, 4);
+    s->xll_smp_in_seg     = 1 << get_bits(&s->gb, 4);
+    s->xll_bits4seg_size  = get_bits(&s->gb, 5) + 1;
+    s->xll_banddata_crcen = get_bits(&s->gb, 2);
+    s->xll_scalable_lsb   = get_bits1(&s->gb);
+    s->xll_bits4ch_mask   = get_bits(&s->gb, 5) + 1;
+
+    if (s->xll_scalable_lsb)
+        s->xll_fixed_lsb_width = get_bits(&s->gb, 4);
+
+    /* skip to the end of the common header */
+    i = get_bits_count(&s->gb);
+    if (hdr_pos + hdr_size * 8 > i)
+        skip_bits_long(&s->gb, hdr_pos + hdr_size * 8 - i);
+
+    for (chset = 0; chset < s->xll_nch_sets; chset++) {
+        XllChSetSubHeader *sh = &s->xll_chsets[chset];
+
+        dca_xll_decode_ch_subset(s, sh);
+    }
+
+    return 0;
+}
+
 /**
  * Parse extension substream header (HD)
  */
@@ -2098,6 +2295,8 @@ static void dca_exss_parse_header(DCAContext *s)
             } else if (mkr == 0x47004a03) {
                 dca_xxch_decode_frame(s);
                 s->core_ext_mask |= DCA_EXT_XXCH; /* xxx use for chan reordering */
+            } else if (mkr == 0x41a29547) {
+                dca_xll_decode_frame(s);
             } else {
                 av_log(s->avctx, AV_LOG_DEBUG,
                        "DTS-ExSS: unknown marker = 0x%08x\n", mkr);
