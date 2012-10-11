@@ -83,6 +83,7 @@ void av_register_all(void)
     REGISTER_DEMUXER  (CDXL, cdxl);
     REGISTER_MUXER    (CRC, crc);
     REGISTER_MUXDEMUX (DAUD, daud);
+    REGISTER_DEMUXER  (DCX, dcx);
     REGISTER_DEMUXER  (DFA, dfa);
     REGISTER_MUXDEMUX (DIRAC, dirac);
     REGISTER_MUXDEMUX (DNXHD, dnxhd);
