@@ -268,7 +268,7 @@ void av_register_all(void)
     REGISTER_DEMUXER (SUBVIEWER1,       subviewer1);
     REGISTER_DEMUXER (SUBVIEWER,        subviewer);
     REGISTER_MUXDEMUX(SWF,              swf);
-    REGISTER_DEMUXER (TAK,              tak);
+    REGISTER_MUXDEMUX(TAK,              tak);
     REGISTER_MUXER   (TEE,              tee);
     REGISTER_DEMUXER (TEDCAPTIONS,      tedcaptions);
     REGISTER_MUXER   (TG2,              tg2);

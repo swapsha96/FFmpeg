@@ -683,7 +683,7 @@ static int tak_decode_frame(AVCodecContext *avctx, void *data,
     if ((ret = init_get_bits8(gb, pkt->data, pkt->size)) < 0)
         return ret;
 
-    if ((ret = ff_tak_decode_frame_header(avctx, gb, &s->ti, 0)) < 0)
+    if ((ret = avpriv_tak_decode_frame_header(avctx, gb, &s->ti, 0)) < 0)
         return ret;
 
     if (avctx->err_recognition & AV_EF_CRCCHECK) {

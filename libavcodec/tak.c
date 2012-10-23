@@ -91,12 +91,12 @@ int ff_tak_check_crc(const uint8_t *buf, unsigned int buf_size)
 void avpriv_tak_parse_streaminfo(GetBitContext *gb, TAKStreamInfo *s)
 {
     uint64_t channel_mask = 0;
-    int frame_type, i;
+    int i;
 
     s->codec = get_bits(gb, TAK_ENCODER_CODEC_BITS);
-    skip_bits(gb, TAK_ENCODER_PROFILE_BITS);
+    s->profile = get_bits(gb, TAK_ENCODER_PROFILE_BITS);
 
-    frame_type = get_bits(gb, TAK_SIZE_FRAME_DURATION_BITS);
+    s->frame_type = get_bits(gb, TAK_SIZE_FRAME_DURATION_BITS);
     s->samples = get_bits64(gb, TAK_SIZE_SAMPLES_NUM_BITS);
 
     s->data_type   = get_bits(gb, TAK_FORMAT_DATA_TYPE_BITS);
@@ -120,11 +120,11 @@ void avpriv_tak_parse_streaminfo(GetBitContext *gb, TAKStreamInfo *s)
     }
 
     s->ch_layout     = channel_mask;
-    s->frame_samples = tak_get_nb_samples(s->sample_rate, frame_type);
+    s->frame_samples = tak_get_nb_samples(s->sample_rate, s->frame_type);
 }
 
-int ff_tak_decode_frame_header(AVCodecContext *avctx, GetBitContext *gb,
-                               TAKStreamInfo *ti, int log_level_offset)
+int avpriv_tak_decode_frame_header(AVCodecContext *avctx, GetBitContext *gb,
+                                   TAKStreamInfo *ti, int log_level_offset)
 {
     if (get_bits(gb, TAK_FRAME_HEADER_SYNC_ID_BITS) != TAK_FRAME_HEADER_SYNC_ID) {
         av_log(avctx, AV_LOG_ERROR + log_level_offset, "missing sync id\n");

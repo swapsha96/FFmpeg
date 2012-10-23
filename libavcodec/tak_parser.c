@@ -47,7 +47,7 @@ static int tak_parse(AVCodecParserContext *s, AVCodecContext *avctx,
     if (s->flags & PARSER_FLAG_COMPLETE_FRAMES) {
         TAKStreamInfo ti;
         init_get_bits(&gb, buf, buf_size);
-        if (!ff_tak_decode_frame_header(avctx, &gb, &ti, 127))
+        if (!avpriv_tak_decode_frame_header(avctx, &gb, &ti, 127))
             s->duration = t->ti.last_frame_samples ? t->ti.last_frame_samples
                                                    : t->ti.frame_samples;
         *poutbuf      = buf;
@@ -75,7 +75,7 @@ static int tak_parse(AVCodecParserContext *s, AVCodecContext *avctx,
 
                 init_get_bits(&gb, pc->buffer + t->index,
                               8 * (pc->index - t->index));
-                if (!ff_tak_decode_frame_header(avctx, &gb,
+                if (!avpriv_tak_decode_frame_header(avctx, &gb,
                         pc->frame_start_found ? &ti : &t->ti, 127) &&
                     !ff_tak_check_crc(pc->buffer + t->index,
                                       get_bits_count(&gb) / 8)) {

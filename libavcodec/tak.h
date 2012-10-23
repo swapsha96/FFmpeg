@@ -78,24 +78,32 @@
 #define TAK_SIZE_BITS                  (TAK_SIZE_SAMPLES_NUM_BITS + \
                                         TAK_SIZE_FRAME_DURATION_BITS)
 
-#define TAK_FORMAT_BITS                (TAK_FORMAT_DATA_TYPE_BITS   + \
+#define TAK_MIN_FORMAT_BITS            (TAK_FORMAT_DATA_TYPE_BITS   + \
                                         TAK_FORMAT_SAMPLE_RATE_BITS + \
                                         TAK_FORMAT_BPS_BITS         + \
-                                        TAK_FORMAT_CHANNEL_BITS + 1 + \
+                                        TAK_FORMAT_CHANNEL_BITS + 1)
+
+#define TAK_MAX_FORMAT_BITS            (TAK_MIN_FORMAT_BITS         + \
                                         TAK_FORMAT_VALID_BITS   + 1 + \
                                         TAK_FORMAT_CH_LAYOUT_BITS   * \
                                         TAK_MAX_CHANNELS)
 
-#define TAK_STREAMINFO_BITS            (TAK_ENCODER_BITS + \
+#define TAK_MIN_STREAMINFO_BITS        (TAK_ENCODER_BITS + \
                                         TAK_SIZE_BITS    + \
-                                        TAK_FORMAT_BITS)
+                                        TAK_MIN_FORMAT_BITS)
+
+#define TAK_MAX_STREAMINFO_BITS        (TAK_ENCODER_BITS + \
+                                        TAK_SIZE_BITS    + \
+                                        TAK_MAX_FORMAT_BITS)
 
 #define TAK_MAX_FRAME_HEADER_BITS      (TAK_MIN_FRAME_HEADER_LAST_BITS + \
-                                        TAK_STREAMINFO_BITS + 31)
+                                        TAK_MAX_STREAMINFO_BITS + 31 )
 
-#define TAK_STREAMINFO_BYTES           ((TAK_STREAMINFO_BITS       + 7) / 8)
 #define TAK_MAX_FRAME_HEADER_BYTES     ((TAK_MAX_FRAME_HEADER_BITS + 7) / 8)
 #define TAK_MIN_FRAME_HEADER_BYTES     ((TAK_MIN_FRAME_HEADER_BITS + 7) / 8)
+#define TAK_MAX_STREAMINFO_BYTES       ((TAK_MAX_STREAMINFO_BITS   + 7) / 8)
+#define TAK_MIN_STREAMINFO_BYTES       ((TAK_MIN_STREAMINFO_BITS   + 7) / 8)
+
 
 enum TAKCodecType {
     TAK_CODEC_MONO_STEREO  = 2,
@@ -129,6 +137,8 @@ enum TAKFrameSizeType {
 typedef struct TAKStreamInfo {
     int               flags;
     enum TAKCodecType codec;
+    int               profile;
+    int               frame_type;
     int               data_type;
     int               sample_rate;
     int               channels;
@@ -158,6 +168,6 @@ void avpriv_tak_parse_streaminfo(GetBitContext *gb, TAKStreamInfo *s);
  *                               error messages.
  * @return non-zero on error, 0 if OK
  */
-int ff_tak_decode_frame_header(AVCodecContext *avctx, GetBitContext *gb,
-                               TAKStreamInfo *s, int log_level_offset);
+int avpriv_tak_decode_frame_header(AVCodecContext *avctx, GetBitContext *gb,
+                                   TAKStreamInfo *s, int log_level_offset);
 #endif /* AVCODEC_TAK_H */
