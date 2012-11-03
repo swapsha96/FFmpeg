@@ -108,6 +108,11 @@ static av_cold int adpcm_encode_init(AVCodecContext *avctx)
         avctx->frame_size  = 64;
         avctx->block_align = 34 * avctx->channels;
         break;
+    case AV_CODEC_ID_ADPCM_IMA_SMJPEG:
+        avctx->frame_size  = 512;
+        avctx->block_align = 260 * avctx->channels;
+        avctx->bits_per_coded_sample = 16;
+        break;
     case AV_CODEC_ID_ADPCM_MS:
         /* each 16 bits sample gives one nibble
            and we have 7 bytes per channel overhead */
@@ -297,6 +302,7 @@ static void adpcm_compress_trellis(AVCodecContext *avctx,
     nodes[0]->sample1 = c->sample1;
     nodes[0]->sample2 = c->sample2;
     if (version == AV_CODEC_ID_ADPCM_IMA_WAV ||
+        version == AV_CODEC_ID_ADPCM_IMA_SMJPEG ||
         version == AV_CODEC_ID_ADPCM_IMA_QT  ||
         version == AV_CODEC_ID_ADPCM_SWF)
         nodes[0]->sample1 = c->prev_sample;
@@ -401,6 +407,7 @@ static void adpcm_compress_trellis(AVCodecContext *avctx,
                                (ff_adpcm_AdaptationTable[nibble] * step) >> 8));
                 }
             } else if (version == AV_CODEC_ID_ADPCM_IMA_WAV ||
+                       version == AV_CODEC_ID_ADPCM_IMA_SMJPEG ||
                        version == AV_CODEC_ID_ADPCM_IMA_QT  ||
                        version == AV_CODEC_ID_ADPCM_SWF) {
 #define LOOP_NODES(NAME, STEP_TABLE, STEP_INDEX)\
@@ -576,6 +583,41 @@ static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         flush_put_bits(&pb);
         break;
     }
+    case AV_CODEC_ID_ADPCM_IMA_SMJPEG:
+    {
+        for (ch = 0; ch < avctx->channels; ch++) {
+            ADPCMChannelStatus *status = &c->status[ch];
+            bytestream_put_be16(&dst, status->prev_sample);
+            bytestream_put_byte(&dst, status->step_index);
+            bytestream_put_byte(&dst, 0);
+        }
+
+        if (avctx->trellis > 0) {
+            n = frame->nb_samples;
+            FF_ALLOC_OR_GOTO(avctx, buf, n * 2, error);
+            if (avctx->channels == 1) {
+                adpcm_compress_trellis(avctx, samples, buf,
+                                       &c->status[0], n, avctx->channels);
+                for (i = 0; i < n; i += 2)
+                    bytestream_put_byte(&dst, (buf[i] << 4) | buf[i + 1]);
+            } else {
+                adpcm_compress_trellis(avctx, samples, buf,
+                                       &c->status[0], n, avctx->channels);
+                adpcm_compress_trellis(avctx, samples + 1, buf + n,
+                                       &c->status[1], n, avctx->channels);
+                for (i = 0; i < n; i++)
+                    bytestream_put_byte(&dst, (buf[i] << 4) | buf[n + i]);
+            }
+            av_free(buf);
+        } else {
+            for (i = 0; i < frame->nb_samples >> (1 - st); i++) {
+                int8_t v = adpcm_ima_qt_compress_sample(&c->status[0 ], *samples++) << 4;
+                v       |= adpcm_ima_qt_compress_sample(&c->status[st], *samples++);
+                bytestream_put_byte(&dst, v);
+            }
+        }
+        break;
+    }
     case AV_CODEC_ID_ADPCM_SWF:
     {
         PutBitContext pb;
@@ -729,6 +771,7 @@ AVCodec ff_ ## name_ ## _encoder = {                        \
 
 ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_QT,  adpcm_ima_qt,  sample_fmts_p, "ADPCM IMA QuickTime");
 ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_WAV, adpcm_ima_wav, sample_fmts_p, "ADPCM IMA WAV");
+ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_SMJPEG, adpcm_ima_smjpeg, sample_fmts, "ADPCM IMA Loki SDL MJPEG");
 ADPCM_ENCODER(AV_CODEC_ID_ADPCM_MS,      adpcm_ms,      sample_fmts,   "ADPCM Microsoft");
 ADPCM_ENCODER(AV_CODEC_ID_ADPCM_SWF,     adpcm_swf,     sample_fmts,   "ADPCM Shockwave Flash");
 ADPCM_ENCODER(AV_CODEC_ID_ADPCM_YAMAHA,  adpcm_yamaha,  sample_fmts,   "ADPCM Yamaha");

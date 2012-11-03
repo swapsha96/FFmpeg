@@ -32,6 +32,7 @@ fate-acodec-pcm-f%be: FMT = au
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_ADX,     ADX)  += adx
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_QT,  AIFF) += ima_qt
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_WAV, WAV)  += ima_wav
+FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_SMJPEG, SMJPEG)  += ima_smjpeg
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_MS,      WAV)  += ms
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_SWF,     FLV)  += swf
 FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_YAMAHA,  WAV)  += yamaha
@@ -45,6 +46,7 @@ fate-acodec-adpcm-%: CODEC = adpcm_$(@:fate-acodec-adpcm-%=%)
 fate-acodec-adpcm-adx:     FMT = adx
 fate-acodec-adpcm-ima_qt:  FMT = aiff
 fate-acodec-adpcm-ima_wav: FMT = wav
+fate-acodec-adpcm-ima_smjpeg: FMT = smjpeg
 fate-acodec-adpcm-ms:      FMT = wav
 fate-acodec-adpcm-swf:     FMT = flv
 fate-acodec-adpcm-yamaha:  FMT = wav
