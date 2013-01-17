@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libswresample/swresample.h"
 #include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -53,6 +54,7 @@ typedef struct {
     unsigned int flip_left : 1;
     uint8_t buffer[AUDIO_BLOCK_SIZE];
     int buffer_ptr;
+    struct SwrContext *swr;
 } AudioData;
 
 static int audio_open(AVFormatContext *s1, int is_output, const char *audio_device)
@@ -123,10 +125,10 @@ static int audio_open(AVFormatContext *s1, int is_output, const char *audio_devi
         goto fail;
     }
 
-    tmp = (s->channels == 2);
-    err = ioctl(audio_fd, SNDCTL_DSP_STEREO, &tmp);
+    tmp = s->channels;
+    err = ioctl(audio_fd, SNDCTL_DSP_CHANNELS, &tmp);
     if (err < 0) {
-        av_log(s1, AV_LOG_ERROR, "SNDCTL_DSP_STEREO: %s\n", strerror(errno));
+        av_log(s1, AV_LOG_ERROR, "SNDCTL_DSP_CHANNELS: %s\n", strerror(errno));
         goto fail;
     }
 
@@ -139,6 +141,20 @@ static int audio_open(AVFormatContext *s1, int is_output, const char *audio_devi
     s->sample_rate = tmp; /* store real sample rate */
     s->fd = audio_fd;
 
+    s->swr = swr_alloc_set_opts(s->swr,
+                                0, AV_SAMPLE_FMT_S16, s->sample_rate,
+                                0, AV_SAMPLE_FMT_S16, s->sample_rate,
+                                0, s1);
+    if (!s->swr) {
+        close(audio_fd);
+        return AVERROR(ENOMEM);
+    }
+    av_opt_set_int(s->swr, "uch", s->channels, 0);
+    av_opt_set_int(s->swr, "och", s->channels, 0);
+    err = swr_init(s->swr);
+    if (err < 0)
+        return err;
+
     return 0;
  fail:
     close(audio_fd);
@@ -148,6 +164,7 @@ static int audio_open(AVFormatContext *s1, int is_output, const char *audio_devi
 static int audio_close(AudioData *s)
 {
     close(s->fd);
+    swr_free(&s->swr);
     return 0;
 }
 
@@ -172,26 +189,26 @@ static int audio_write_header(AVFormatContext *s1)
 static int audio_write_packet(AVFormatContext *s1, AVPacket *pkt)
 {
     AudioData *s = s1->priv_data;
-    int len, ret;
+    int ret;
     int size= pkt->size;
-    uint8_t *buf= pkt->data;
+    int in_samples = size / (2 * s->channels);
+    int out_samples = AUDIO_BLOCK_SIZE / (2 * s->channels);
+    uint8_t *out[] = {s->buffer};
+    const uint8_t *in[] = {pkt->data};
 
+    swr_convert(s->swr, out, 0, in, in_samples);
     while (size > 0) {
-        len = FFMIN(AUDIO_BLOCK_SIZE - s->buffer_ptr, size);
-        memcpy(s->buffer + s->buffer_ptr, buf, len);
-        s->buffer_ptr += len;
-        if (s->buffer_ptr >= AUDIO_BLOCK_SIZE) {
-            for(;;) {
-                ret = write(s->fd, s->buffer, AUDIO_BLOCK_SIZE);
-                if (ret > 0)
-                    break;
-                if (ret < 0 && (errno != EAGAIN && errno != EINTR))
-                    return AVERROR(EIO);
-            }
-            s->buffer_ptr = 0;
+        out_samples = FFMIN(size, AUDIO_BLOCK_SIZE);
+        out_samples /= (2 * s->channels);
+        swr_convert(s->swr, out, out_samples, in, 0);
+        for(;;) {
+            ret = write(s->fd, s->buffer, FFMIN(size, AUDIO_BLOCK_SIZE));
+            if (ret > 0)
+                break;
+            if (ret < 0 && (errno != EAGAIN && errno != EINTR))
+                return AVERROR(EIO);
         }
-        buf += len;
-        size -= len;
+        size -= AUDIO_BLOCK_SIZE;
     }
     return 0;
 }
