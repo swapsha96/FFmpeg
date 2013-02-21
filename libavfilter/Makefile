@@ -212,6 +212,7 @@ OBJS-$(CONFIG_MP_FILTER) += libmpcodecs/pullup.o
 
 # multimedia filters
 OBJS-$(CONFIG_CONCAT_FILTER)                 += avf_concat.o
+OBJS-$(CONFIG_PHASESCOPE_FILTER)             += avf_phasescope.o
 OBJS-$(CONFIG_SHOWSPECTRUM_FILTER)           += avf_showspectrum.o
 OBJS-$(CONFIG_SHOWWAVES_FILTER)              += avf_showwaves.o
 
