@@ -6643,6 +6643,24 @@ This filter use field-dominance information in frame to decide which
 of each pair of fields to place first in the output.
 If it gets it wrong use @ref{setfield} filter before @code{separatefields} filter.
 
+@section joinfields
+
+The @code{joinfields} takes a field-based video input and joins
+top and bottom field into its components frame, producing a double height clip
+with half the frame rate and half the frame count.
+
+The filter accept the following option:
+@table @option
+@item first_field
+@table @samp
+@item top, t
+top field first
+@item bottom, b
+bottom field first
+The default value is @code{top}.
+@end table
+@end table
+
 @section setdar, setsar
 
 The @code{setdar} filter sets the Display Aspect Ratio for the filter
