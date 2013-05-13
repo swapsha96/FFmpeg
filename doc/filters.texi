@@ -2455,6 +2455,10 @@ colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131
 @end example
 @end itemize
 
+@section colorlevels
+
+Adjust color adjustments using levels.
+
 @section colormatrix
 
 Convert color matrix.
