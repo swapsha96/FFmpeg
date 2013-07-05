@@ -2682,7 +2682,7 @@ The filter accepts the following options:
 
 @item limit
 Set higher black value threshold, which can be optionally specified
-from nothing (0) to everything (255). An intensity value greater
+from nothing (0) to everything (65535). An intensity value greater
 to the set value is considered non-black. Default value is 24.
 
 @item round

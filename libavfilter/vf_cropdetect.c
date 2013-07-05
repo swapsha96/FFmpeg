@@ -25,6 +25,7 @@
 
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
+#include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 
 #include "avfilter.h"
@@ -45,11 +46,25 @@ typedef struct {
 static int query_formats(AVFilterContext *ctx)
 {
     static const enum AVPixelFormat pix_fmts[] = {
+        AV_PIX_FMT_GRAY8,   AV_PIX_FMT_GRAY16,
+        AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUVJ411P,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P,
         AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUVJ422P,
+        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUVJ440P,
         AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUVJ444P,
-        AV_PIX_FMT_YUV411P, AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_NV12,    AV_PIX_FMT_NV21,
+        AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
+        AV_PIX_FMT_YUV420P9, AV_PIX_FMT_YUV422P9, AV_PIX_FMT_YUV444P9,
+        AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA444P9,
+        AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
+        AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA444P10,
+        AV_PIX_FMT_YUV420P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV444P12,
+        AV_PIX_FMT_YUV420P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV444P14,
+        AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
+        AV_PIX_FMT_YUVA420P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA444P16,
+        AV_PIX_FMT_NV12, AV_PIX_FMT_NV21,
+        AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24, AV_PIX_FMT_RGB48, AV_PIX_FMT_BGR48,
+        AV_PIX_FMT_RGBA, AV_PIX_FMT_BGRA, AV_PIX_FMT_RGB0, AV_PIX_FMT_BGR0,
+        AV_PIX_FMT_RGBA64, AV_PIX_FMT_BGRA64,
         AV_PIX_FMT_NONE
     };
 
@@ -57,15 +72,21 @@ static int query_formats(AVFilterContext *ctx)
     return 0;
 }
 
-static int checkline(void *ctx, const unsigned char *src, int stride, int len, int bpp)
+static int64_t checkline(void *ctx, const uint8_t *src, int stride, int len, int bpp)
 {
-    int total = 0;
+    int64_t total = 0;
     int div = len;
 
     switch (bpp) {
     case 1:
         while (--len >= 0) {
             total += src[0];
+            src += stride;
+        }
+        break;
+    case 2:
+        while (--len >= 0) {
+            total += AV_RN16(&src[0]);
             src += stride;
         }
         break;
@@ -77,10 +98,18 @@ static int checkline(void *ctx, const unsigned char *src, int stride, int len, i
         }
         div *= 3;
         break;
+    case 6:
+    case 8:
+        while (--len >= 0) {
+            total += AV_RN16(&src[0]) + AV_RN16(&src[2]) + AV_RN16(&src[4]);
+            src += stride;
+        }
+        div *= 3;
+        break;
     }
     total /= div;
 
-    av_log(ctx, AV_LOG_DEBUG, "total:%d\n", total);
+    av_log(ctx, AV_LOG_DEBUG, "total:%"PRId64"\n", total);
     return total;
 }
 
@@ -212,7 +241,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 
 static const AVOption cropdetect_options[] = {
-    { "limit", "Threshold below which the pixel is considered black", OFFSET(limit),       AV_OPT_TYPE_INT, { .i64 = 24 }, 0, 255, FLAGS },
+    { "limit", "Threshold below which the pixel is considered black", OFFSET(limit),       AV_OPT_TYPE_INT, { .i64 = 24 }, 0, 65535, FLAGS },
     { "round", "Value by which the width/height should be divisible", OFFSET(round),       AV_OPT_TYPE_INT, { .i64 = 16 }, 0, INT_MAX, FLAGS },
     { "reset", "Recalculate the crop area after this many frames",    OFFSET(reset_count), AV_OPT_TYPE_INT, { .i64 = 0 },  0, INT_MAX, FLAGS },
     { "reset_count", "Recalculate the crop area after this many frames",OFFSET(reset_count),AV_OPT_TYPE_INT,{ .i64 = 0 },  0, INT_MAX, FLAGS },
