@@ -46,6 +46,10 @@ typedef struct {
     int is_be;
 } Super2xSaIContext;
 
+typedef struct ThreadData {
+    AVFrame *in, *out;
+} ThreadData;
+
 #define GET_RESULT(A, B, C, D) ((A != C || A != D) - (B != C || B != D))
 
 #define INTERPOLATE(A, B) (((A & hi_pixel_mask) >> 1) + ((B & hi_pixel_mask) >> 1) + (A & B & lo_pixel_mask))
@@ -53,32 +57,39 @@ typedef struct {
 #define Q_INTERPOLATE(A, B, C, D) ((A & q_hi_pixel_mask) >> 2) + ((B & q_hi_pixel_mask) >> 2) + ((C & q_hi_pixel_mask) >> 2) + ((D & q_hi_pixel_mask) >> 2) \
     + ((((A & q_lo_pixel_mask) + (B & q_lo_pixel_mask) + (C & q_lo_pixel_mask) + (D & q_lo_pixel_mask)) >> 2) & q_lo_pixel_mask)
 
-static void super2xsai(AVFilterContext *ctx,
-                       uint8_t *src, int src_linesize,
-                       uint8_t *dst, int dst_linesize,
-                       int width, int height)
+static int super2xsai(AVFilterContext *ctx,
+                      void *arg, int jobnr, int nb_jobs)
 {
     Super2xSaIContext *sai = ctx->priv;
+    ThreadData *td = arg;
+    const uint8_t *src = td->in->data[0];
+    const int src_linesize = td->in->linesize[0];
+    uint8_t *dst = td->out->data[0];
+    const int dst_linesize = td->out->linesize[0];
     unsigned int x, y;
     uint32_t color[4][4];
-    unsigned char *src_line[4];
+    const uint8_t *src_line[4];
     const int bpp = sai->bpp;
     const uint32_t hi_pixel_mask = sai->hi_pixel_mask;
     const uint32_t lo_pixel_mask = sai->lo_pixel_mask;
     const uint32_t q_hi_pixel_mask = sai->q_hi_pixel_mask;
     const uint32_t q_lo_pixel_mask = sai->q_lo_pixel_mask;
+    const int height = td->in->height;
+    const int width = td->in->width;
+    const int start = (height *  jobnr     ) / nb_jobs;
+    const int end   = (height * (jobnr + 1)) / nb_jobs;
 
     /* Point to the first 4 lines, first line is duplicated */
-    src_line[0] = src;
-    src_line[1] = src;
-    src_line[2] = src + src_linesize*FFMIN(1, height-1);
-    src_line[3] = src + src_linesize*FFMIN(2, height-1);
+    src_line[0] = src + src_linesize * start;
+    src_line[1] = src + src_linesize * start;
+    src_line[2] = src + src_linesize * FFMIN(start + 1, end - 1);
+    src_line[3] = src + src_linesize * FFMIN(start + 2, end - 1);
 
 #define READ_COLOR4(dst, src_line, off) dst = *((const uint32_t *)src_line + off)
 #define READ_COLOR3(dst, src_line, off) dst = AV_RL24 (src_line + 3*off)
 #define READ_COLOR2(dst, src_line, off) dst = sai->is_be ? AV_RB16(src_line + 2 * off) : AV_RL16(src_line + 2 * off)
 
-    for (y = 0; y < height; y++) {
+    for (y = start; y < end; y++) {
         uint8_t *dst_line[2];
 
         dst_line[0] = dst + dst_linesize*2*y;
@@ -226,9 +237,11 @@ static void super2xsai(AVFilterContext *ctx,
 
         /* Read next line */
         src_line[3] = src_line[2];
-        if (y < height - 3)
+        if (y < end - 3)
             src_line[3] += src_linesize;
     } // y loop
+
+    return 0;
 }
 
 static int query_formats(AVFilterContext *ctx)
@@ -305,7 +318,9 @@ static int config_output(AVFilterLink *outlink)
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
 {
-    AVFilterLink *outlink = inlink->dst->outputs[0];
+    AVFilterContext *ctx = inlink->dst;
+    AVFilterLink *outlink = ctx->outputs[0];
+    ThreadData td;
     AVFrame *outpicref = ff_get_video_buffer(outlink, outlink->w, outlink->h);
     if (!outpicref) {
         av_frame_free(&inpicref);
@@ -315,9 +330,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
     outpicref->width  = outlink->w;
     outpicref->height = outlink->h;
 
-    super2xsai(inlink->dst, inpicref->data[0], inpicref->linesize[0],
-               outpicref->data[0], outpicref->linesize[0],
-               inlink->w, inlink->h);
+    td.in = inpicref; td.out = outpicref;
+    ctx->internal->execute(ctx, super2xsai, &td, NULL, FFMIN(inlink->h, ctx->graph->nb_threads));
 
     av_frame_free(&inpicref);
     return ff_filter_frame(outlink, outpicref);
@@ -349,4 +363,5 @@ AVFilter avfilter_vf_super2xsai = {
     .query_formats = query_formats,
     .inputs        = super2xsai_inputs,
     .outputs       = super2xsai_outputs,
+    .flags         = AVFILTER_FLAG_SLICE_THREADS,
 };
