@@ -37,28 +37,7 @@
 #include "formats.h"
 #include "internal.h"
 #include "video.h"
-
-typedef enum {
-    TRANSPOSE_PT_TYPE_NONE,
-    TRANSPOSE_PT_TYPE_LANDSCAPE,
-    TRANSPOSE_PT_TYPE_PORTRAIT,
-} PassthroughType;
-
-enum TransposeDir {
-    TRANSPOSE_CCLOCK_FLIP,
-    TRANSPOSE_CLOCK,
-    TRANSPOSE_CCLOCK,
-    TRANSPOSE_CLOCK_FLIP,
-};
-
-typedef struct {
-    const AVClass *class;
-    int hsub, vsub;
-    int pixsteps[4];
-
-    PassthroughType passthrough; ///< landscape passthrough mode enabled
-    enum TransposeDir dir;
-} TransContext;
+#include "vf_transpose.h"
 
 static int query_formats(AVFilterContext *ctx)
 {
@@ -116,6 +95,9 @@ static int config_props_output(AVFilterLink *outlink)
         outlink->sample_aspect_ratio = av_div_q((AVRational){1,1}, inlink->sample_aspect_ratio);
     } else
         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+
+    if (ARCH_X86)
+        ff_transpose_init_x86(trans);
 
     av_log(ctx, AV_LOG_VERBOSE, "w:%d h:%d dir:%d -> w:%d h:%d rotation:%s vflip:%d\n",
            inlink->w, inlink->h, trans->dir, outlink->w, outlink->h,
@@ -176,9 +158,10 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr,
 
         switch (pixstep) {
         case 1:
-            for (y = start; y < end; y++, dst += dstlinesize)
-                for (x = 0; x < outw; x++)
-                    dst[x] = src[x*srclinesize + y];
+            for (y = start; y < end; y += 8)
+                for (x = 0; x < outw; x += 8)
+                    trans->transpose_block(src + x * srclinesize + y, srclinesize,
+                                           dst + y * dstlinesize + x, dstlinesize);
             break;
         case 2:
             for (y = start; y < end; y++, dst += dstlinesize) {
@@ -247,6 +230,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     td.in = in, td.out = out;
     ctx->internal->execute(ctx, filter_slice, &td, NULL, FFMIN(outlink->h, ctx->graph->nb_threads));
+    emms_c();
+
     av_frame_free(&in);
     return ff_filter_frame(outlink, out);
 }
