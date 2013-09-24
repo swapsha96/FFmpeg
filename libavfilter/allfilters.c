@@ -86,6 +86,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(EQUALIZER,      equalizer,      af);
     REGISTER_FILTER(FLANGER,        flanger,        af);
     REGISTER_FILTER(HIGHPASS,       highpass,       af);
+    REGISTER_FILTER(HRTF,           hrtf,           af);
     REGISTER_FILTER(JOIN,           join,           af);
     REGISTER_FILTER(LADSPA,         ladspa,         af);
     REGISTER_FILTER(LOWPASS,        lowpass,        af);
