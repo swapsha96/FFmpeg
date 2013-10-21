@@ -127,6 +127,7 @@ OBJS-$(CONFIG_DCTDNOIZ_FILTER)               += vf_dctdnoiz.o
 OBJS-$(CONFIG_DECIMATE_FILTER)               += vf_decimate.o
 OBJS-$(CONFIG_DELOGO_FILTER)                 += vf_delogo.o
 OBJS-$(CONFIG_DESHAKE_FILTER)                += vf_deshake.o
+OBJS-$(CONFIG_DISPLACE_FILTER)               += vf_displace.o framesync.o
 OBJS-$(CONFIG_DRAWBOX_FILTER)                += vf_drawbox.o
 OBJS-$(CONFIG_DRAWGRID_FILTER)               += vf_drawbox.o
 OBJS-$(CONFIG_DRAWTEXT_FILTER)               += vf_drawtext.o
