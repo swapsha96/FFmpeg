@@ -48,6 +48,7 @@ Specifically, the GPL parts of FFmpeg are:
     - vf_pullup.c
     - vf_sab.c
     - vf_smartblur.c
+    - vf_softpulldown.c
     - vf_spp.c
     - vf_stereo3d.c
     - vf_super2xsai.c
