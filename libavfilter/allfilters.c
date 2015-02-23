@@ -60,6 +60,8 @@ void avfilter_register_all(void)
     REGISTER_FILTER(AMERGE,         amerge,         af);
     REGISTER_FILTER(AMIX,           amix,           af);
     REGISTER_FILTER(ANEQUALIZER,    anequalizer,    af);
+    REGISTER_FILTER(ANOISEPROFILE,  anoiseprofile,  af);
+    REGISTER_FILTER(ANOISEREDUCE,   anoisereduce,   af);
     REGISTER_FILTER(ANULL,          anull,          af);
     REGISTER_FILTER(APAD,           apad,           af);
     REGISTER_FILTER(APERMS,         aperms,         af);
