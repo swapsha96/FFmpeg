@@ -132,9 +132,9 @@ static int filter_slice8(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs
         uint8_t *dst = out->data[p] + slice_start * out->linesize[p];
         const int thra = s->thra[p];
         const int thrb = s->thrb[p];
-        uint8_t **data = (uint8_t **)s->data[p];
-        int *linesize = (int *)s->linesize[p];
-        uint8_t *srcf[SIZE];
+        const uint8_t **data = (const uint8_t **)s->data[p];
+        const int *linesize = (const int *)s->linesize[p];
+        const uint8_t *srcf[SIZE];
 
         for (i = 0; i < size; i++)
             srcf[i] = data[i] + slice_start * linesize[i];
@@ -154,9 +154,8 @@ static int filter_slice8(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs
                     ldiff = FFABS(srcx - srcjx);
                     lsumdiff += ldiff;
                     if (ldiff > thra ||
-                        lsumdiff > thrb) {
+                        lsumdiff > thrb)
                         break;
-                    }
                     l++;
                     sum += srcjx;
 
@@ -165,9 +164,8 @@ static int filter_slice8(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs
                     rdiff = FFABS(srcx - srcix);
                     rsumdiff += rdiff;
                     if (rdiff > thra ||
-                        rsumdiff > thrb) {
+                        rsumdiff > thrb)
                         break;
-                    }
                     r++;
                     sum += srcix;
                 }
@@ -205,12 +203,12 @@ static int filter_slice16(AVFilterContext *ctx, void *arg, int jobnr, int nb_job
         uint16_t *dst = (uint16_t *)(out->data[p] + slice_start * out->linesize[p]);
         const int thra = s->thra[p];
         const int thrb = s->thrb[p];
-        uint8_t **data = (uint8_t **)s->data[p];
-        int *linesize = (int *)s->linesize[p];
-        uint16_t *srcf[SIZE];
+        const uint8_t **data = (const uint8_t **)s->data[p];
+        const int *linesize = (const int *)s->linesize[p];
+        const uint16_t *srcf[SIZE];
 
         for (i = 0; i < s->size; i++)
-            srcf[i] = (uint16_t *)(data[i] + slice_start * linesize[i]);
+            srcf[i] = (const uint16_t *)(data[i] + slice_start * linesize[i]);
 
         for (y = slice_start; y < slice_end; y++) {
             for (x = 0; x < w; x++) {
@@ -227,9 +225,8 @@ static int filter_slice16(AVFilterContext *ctx, void *arg, int jobnr, int nb_job
                     ldiff = FFABS(srcx - srcjx);
                     lsumdiff += ldiff;
                     if (ldiff > thra ||
-                        lsumdiff > thrb) {
+                        lsumdiff > thrb)
                         break;
-                    }
                     l++;
                     sum += srcjx;
 
@@ -238,9 +235,8 @@ static int filter_slice16(AVFilterContext *ctx, void *arg, int jobnr, int nb_job
                     rdiff = FFABS(srcx - srcix);
                     rsumdiff += rdiff;
                     if (rdiff > thra ||
-                        rsumdiff > thrb) {
+                        rsumdiff > thrb)
                         break;
-                    }
                     r++;
                     sum += srcix;
                 }
