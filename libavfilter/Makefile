@@ -212,6 +212,7 @@ OBJS-$(CONFIG_SHOWPALETTE_FILTER)            += vf_showpalette.o
 OBJS-$(CONFIG_SHUFFLEPLANES_FILTER)          += vf_shuffleplanes.o
 OBJS-$(CONFIG_SIGNALSTATS_FILTER)            += vf_signalstats.o
 OBJS-$(CONFIG_SMARTBLUR_FILTER)              += vf_smartblur.o
+OBJS-$(CONFIG_SPECTROGRAPH_FILTER)           += vf_spectrograph.o
 OBJS-$(CONFIG_SPLIT_FILTER)                  += split.o
 OBJS-$(CONFIG_SPP_FILTER)                    += vf_spp.o
 OBJS-$(CONFIG_SSIM_FILTER)                   += vf_ssim.o dualinput.o framesync.o

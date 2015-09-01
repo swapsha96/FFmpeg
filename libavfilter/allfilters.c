@@ -227,6 +227,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(SHUFFLEPLANES,  shuffleplanes,  vf);
     REGISTER_FILTER(SIGNALSTATS,    signalstats,    vf);
     REGISTER_FILTER(SMARTBLUR,      smartblur,      vf);
+    REGISTER_FILTER(SPECTROGRAPH,   spectrograph,   vf);
     REGISTER_FILTER(SPLIT,          split,          vf);
     REGISTER_FILTER(SPP,            spp,            vf);
     REGISTER_FILTER(SSIM,           ssim,           vf);
