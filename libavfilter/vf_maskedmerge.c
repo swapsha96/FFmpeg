@@ -23,24 +23,9 @@
 #include "libavutil/opt.h"
 #include "avfilter.h"
 #include "formats.h"
-#include "framesync.h"
 #include "internal.h"
 #include "video.h"
-
-typedef struct MaskedMergeContext {
-    const AVClass *class;
-    int width[4], height[4];
-    int nb_planes;
-    int planes;
-    int max, half, depth;
-    FFFrameSync fs;
-
-    void (*maskedmerge)(const uint8_t *bsrc, int blinesize,
-                        const uint8_t *osrc, int olinesize,
-                        const uint8_t *msrc, int mlinesize,
-                        uint8_t *dst, int dlinesize, int w, int h,
-                        int max, int half, int shift);
-} MaskedMergeContext;
+#include "maskedmerge.h"
 
 #define OFFSET(x) offsetof(MaskedMergeContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
@@ -190,6 +175,9 @@ static int config_input(AVFilterLink *inlink)
         s->maskedmerge = maskedmerge8;
     else
         s->maskedmerge = maskedmerge16;
+
+    if (ARCH_X86)
+        ff_maskedmerge_init_x86(s);
 
     return 0;
 }
