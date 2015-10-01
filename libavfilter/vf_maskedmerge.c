@@ -99,7 +99,7 @@ static int process_frame(FFFrameSync *fs)
                            mask->data[p], mask->linesize[p],
                            out->data[p], out->linesize[p],
                            s->width[p], s->height[p],
-                           s->max, s->half, s->depth);
+                           s->half, s->depth);
         }
     }
     out->pts = av_rescale_q(base->pts, s->fs.time_base, outlink->time_base);
@@ -111,13 +111,13 @@ static void maskedmerge8(const uint8_t *bsrc, int blinesize,
                          const uint8_t *osrc, int olinesize,
                          const uint8_t *msrc, int mlinesize,
                          uint8_t *dst, int dlinesize, int w, int h,
-                         int max, int half, int shift)
+                         int half, int shift)
 {
     int x, y;
 
     for (y = 0; y < h; y++) {
         for (x = 0; x < w; x++) {
-            dst[x] = ((256 - msrc[x]) * bsrc[x] + msrc[x] * osrc[x] + 128) >> 8;
+            dst[x] = bsrc[x] + ((msrc[x] * (osrc[x] - bsrc[x]) + 128) >> 8);
         }
 
         dst  += dlinesize;
@@ -131,7 +131,7 @@ static void maskedmerge16(const uint8_t *bbsrc, int blinesize,
                           const uint8_t *oosrc, int olinesize,
                           const uint8_t *mmsrc, int mlinesize,
                           uint8_t *ddst, int dlinesize, int w, int h,
-                          int max, int half, int shift)
+                          int half, int shift)
 {
     const uint16_t *bsrc = (const uint16_t *)bbsrc;
     const uint16_t *osrc = (const uint16_t *)oosrc;
@@ -141,7 +141,7 @@ static void maskedmerge16(const uint8_t *bbsrc, int blinesize,
 
     for (y = 0; y < h; y++) {
         for (x = 0; x < w; x++) {
-            dst[x] = ((max - msrc[x]) * bsrc[x] + msrc[x] * osrc[x] + half) >> shift;
+            dst[x] = bsrc[x] + ((msrc[x] * (osrc[x] - bsrc[x]) + half) >> shift);
         }
 
         dst  += dlinesize / 2;
@@ -168,8 +168,7 @@ static int config_input(AVFilterLink *inlink)
     s->width[0]  = s->width[3]  = inlink->w;
 
     s->depth = desc->comp[0].depth;
-    s->max = 1 << s->depth;
-    s->half = s->max / 2;
+    s->half = (1 << s->depth) / 2;
 
     if (desc->comp[0].depth == 8)
         s->maskedmerge = maskedmerge8;

@@ -25,5 +25,13 @@
 SECTION .text
 
 INIT_XMM sse2
-cglobal maskedmerge8, 13, 14, 3, 0, bsrc, blinesize, osrc, olinesize, msrc, mlinesize, dst, dlinesize, w, h, max, half, shift
+cglobal maskedmerge8, 10, 14, 3, 0, bsrc, blinesize, osrc, olinesize, msrc, mlinesize, dst, dlinesize, w, h
+.nextrow:
+
+    lea bsrcq, [bsrcq+blinesizeq]
+    lea osrcq, [osrcq+olinesizeq]
+    lea msrcq, [msrcq+mlinesizeq]
+    lea dstq, [dstq+dlinesizeq]
+    sub hd, 1
+    jg .nextrow
 RET

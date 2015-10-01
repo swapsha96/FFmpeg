@@ -27,7 +27,7 @@ void ff_maskedmerge8_sse2(const uint8_t *bsrc, int blinesize,
                           const uint8_t *osrc, int olinesize,
                           const uint8_t *msrc, int mlinesize,
                           uint8_t *dst, int dlinesize, int w, int h,
-                          int max, int half, int shift);
+                          int half, int shift);
 
 av_cold void ff_maskedmerge_init_x86(MaskedMergeContext *s)
 {

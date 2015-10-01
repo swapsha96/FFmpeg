@@ -26,14 +26,14 @@ typedef struct MaskedMergeContext {
     int width[4], height[4];
     int nb_planes;
     int planes;
-    int max, half, depth;
+    int half, depth;
     FFFrameSync fs;
 
     void (*maskedmerge)(const uint8_t *bsrc, int blinesize,
                         const uint8_t *osrc, int olinesize,
                         const uint8_t *msrc, int mlinesize,
                         uint8_t *dst, int dlinesize, int w, int h,
-                        int max, int half, int shift);
+                        int half, int shift);
 } MaskedMergeContext;
 
 void ff_maskedmerge_init_x86(MaskedMergeContext *s);
