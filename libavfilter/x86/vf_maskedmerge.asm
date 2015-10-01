@@ -22,11 +22,37 @@
 
 %include "libavutil/x86/x86util.asm"
 
+SECTION_RODATA
+
+pw_128: times 8 dw 128
+
 SECTION .text
 
 INIT_XMM sse2
 cglobal maskedmerge8, 10, 14, 3, 0, bsrc, blinesize, osrc, olinesize, msrc, mlinesize, dst, dlinesize, w, h
+    mova m7, [pw_128]
 .nextrow:
+    mov r10q, 0
+    %define x r10q
+
+    pxor m6, m6
+    .loop:
+        movh m0, [bsrcq + x]
+        movh m1, [osrcq + x]
+        movh m3, [msrcq + x]
+        punpcklbw m0, m6
+        punpcklbw m1, m6
+        punpcklbw m3, m6
+        psubw m1, m0
+        pmullw m1, m3
+        paddw m1, m7
+        psrlw m1, 8
+        paddw m1, m0
+        packuswb m1, m1
+        movh [dstq + x], m1
+        add r10q, mmsize / 2
+        cmp r10q, wq
+    jl .loop
 
     lea bsrcq, [bsrcq+blinesizeq]
     lea osrcq, [osrcq+olinesizeq]
@@ -34,4 +60,4 @@ cglobal maskedmerge8, 10, 14, 3, 0, bsrc, blinesize, osrc, olinesize, msrc, mlin
     lea dstq, [dstq+dlinesizeq]
     sub hd, 1
     jg .nextrow
-RET
+REP_RET
