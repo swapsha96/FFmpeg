@@ -218,6 +218,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(PAD,            pad,            vf);
     REGISTER_FILTER(PALETTEGEN,     palettegen,     vf);
     REGISTER_FILTER(PALETTEUSE,     paletteuse,     vf);
+    REGISTER_FILTER(PANORAMA,       panorama,       vf);
     REGISTER_FILTER(PERMS,          perms,          vf);
     REGISTER_FILTER(PERSPECTIVE,    perspective,    vf);
     REGISTER_FILTER(PHASE,          phase,          vf);
