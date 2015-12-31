@@ -63,6 +63,7 @@ typedef struct {
     int rdft_bits;              ///< number of bits (RDFT window size = 1<<rdft_bits)
     FFTSample **rdft_data;      ///< bins holder for each (displayed) channels
     float *window_func_lut;     ///< Window function LUT
+    float **magnitudes;
     int win_func;
     int win_size;
     double win_scale;
@@ -186,6 +187,9 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_freep(&s->rdft_data[i]);
     av_freep(&s->rdft_data);
     av_freep(&s->window_func_lut);
+    for (i = 0; i < s->nb_display_channels; i++)
+        av_freep(&s->magnitudes[i]);
+    av_freep(&s->magnitudes);
     av_frame_free(&s->outpicref);
     av_audio_fifo_free(s->fifo);
 }
@@ -266,6 +270,15 @@ static int config_output(AVFilterLink *outlink)
             av_freep(&s->rdft_data[i]);
         av_freep(&s->rdft_data);
         s->nb_display_channels = inlink->channels;
+
+        s->magnitudes = av_calloc(s->nb_display_channels, sizeof(*s->magnitudes));
+        if (!s->magnitudes)
+            return AVERROR(ENOMEM);
+        for (i = 0; i < s->nb_display_channels; i++) {
+            s->magnitudes[i] = av_calloc(s->orientation == VERTICAL ? s->h: s->w, sizeof(**s->magnitudes));
+            if (!s->magnitudes[i])
+                return AVERROR(ENOMEM);
+        }
 
         s->rdft_data = av_calloc(s->nb_display_channels, sizeof(*s->rdft_data));
         if (!s->rdft_data)
@@ -370,6 +383,63 @@ static int request_frame(AVFilterLink *outlink)
     return ret;
 }
 
+static void run_rdft(ShowSpectrumContext *s, AVFrame *fin)
+{
+    int ch, n;
+
+    /* fill RDFT input with the number of samples available */
+    for (ch = 0; ch < s->nb_display_channels; ch++) {
+        const int16_t *p = (int16_t *)fin->extended_data[ch];
+
+        for (n = 0; n < s->win_size; n++)
+            s->rdft_data[ch][n] = p[n] * s->window_func_lut[n];
+    }
+
+    /* run RDFT on each samples set */
+    for (ch = 0; ch < s->nb_display_channels; ch++)
+        av_rdft_calc(s->rdft, s->rdft_data[ch]);
+}
+
+#define RE(y, ch) s->rdft_data[ch][2 * (y) + 0]
+#define IM(y, ch) s->rdft_data[ch][2 * (y) + 1]
+#define MAGNITUDE(y, ch) hypot(RE(y, ch), IM(y, ch))
+
+static void calc_magnitudes(ShowSpectrumContext *s)
+{
+    int ch, y, h = s->orientation == VERTICAL ? s->h: s->w;
+
+    for (ch = 0; ch < s->nb_display_channels; ch++) {
+        float *magnitudes = s->magnitudes[ch];
+
+        for (y = 0; y < h; y++)
+            magnitudes[y] = MAGNITUDE(y, ch);
+    }
+}
+
+static void acalc_magnitudes(ShowSpectrumContext *s)
+{
+    int ch, y, h = s->orientation == VERTICAL ? s->h: s->w;
+
+    for (ch = 0; ch < s->nb_display_channels; ch++) {
+        float *magnitudes = s->magnitudes[ch];
+
+        for (y = 0; y < h; y++)
+            magnitudes[y] += MAGNITUDE(y, ch);
+    }
+}
+
+static void scale_magnitudes(ShowSpectrumContext *s, float scale)
+{
+    int ch, y, h = s->orientation == VERTICAL ? s->h: s->w;
+
+    for (ch = 0; ch < s->nb_display_channels; ch++) {
+        float *magnitudes = s->magnitudes[ch];
+
+        for (y = 0; y < h; y++)
+            magnitudes[y] *= scale;
+    }
+}
+
 static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
 {
     int ret;
@@ -380,27 +450,9 @@ static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
     const double w = s->win_scale;
     int h = s->orientation == VERTICAL ? s->channel_height : s->channel_width;
 
-    int ch, plane, n, x, y;
-
-    av_assert0(insamples->nb_samples == s->win_size);
-
-    /* fill RDFT input with the number of samples available */
-    for (ch = 0; ch < s->nb_display_channels; ch++) {
-        const int16_t *p = (int16_t *)insamples->extended_data[ch];
-
-        for (n = 0; n < s->win_size; n++)
-            s->rdft_data[ch][n] = p[n] * s->window_func_lut[n];
-    }
-
-    /* run RDFT on each samples set */
-    for (ch = 0; ch < s->nb_display_channels; ch++)
-        av_rdft_calc(s->rdft, s->rdft_data[ch]);
+    int ch, plane, x, y;
 
     /* fill a new spectrum column */
-#define RE(y, ch) s->rdft_data[ch][2 * (y) + 0]
-#define IM(y, ch) s->rdft_data[ch][2 * (y) + 1]
-#define MAGNITUDE(y, ch) hypot(RE(y, ch), IM(y, ch))
-
     /* initialize buffer for combining to black */
     if (s->orientation == VERTICAL) {
         for (y = 0; y < outlink->h; y++) {
@@ -417,6 +469,7 @@ static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
     }
 
     for (ch = 0; ch < s->nb_display_channels; ch++) {
+        float *magnitudes = s->magnitudes[ch];
         float yf, uf, vf;
 
         /* decide color range */
@@ -471,7 +524,7 @@ static int plot_spectrum_column(AVFilterLink *inlink, AVFrame *insamples)
             float *out = &s->combine_buffer[3 * row];
 
             /* get magnitude */
-            float a = w * MAGNITUDE(y, ch);
+            float a = w * magnitudes[y];
 
             /* apply scale */
             switch (s->scale) {
@@ -631,6 +684,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
         if (ret < 0)
             goto fail;
 
+        av_assert0(fin->nb_samples == s->win_size);
+
+        run_rdft(s, fin);
+        calc_magnitudes(s);
+
         ret = plot_spectrum_column(inlink, fin);
         av_frame_free(&fin);
         av_audio_fifo_drain(s->fifo, s->skip_samples);
@@ -671,4 +729,149 @@ AVFilter ff_avf_showspectrum = {
     .inputs        = showspectrum_inputs,
     .outputs       = showspectrum_outputs,
     .priv_class    = &showspectrum_class,
+};
+
+static const AVOption showspectrumpic_options[] = {
+    { "size", "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "640x512"}, 0, 0, FLAGS },
+    { "s",    "set video size", OFFSET(w), AV_OPT_TYPE_IMAGE_SIZE, {.str = "640x512"}, 0, 0, FLAGS },
+    { "mode", "set channel display mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=COMBINED}, COMBINED, NB_MODES-1, FLAGS, "mode" },
+        { "combined", "combined mode", 0, AV_OPT_TYPE_CONST, {.i64=COMBINED}, 0, 0, FLAGS, "mode" },
+        { "separate", "separate mode", 0, AV_OPT_TYPE_CONST, {.i64=SEPARATE}, 0, 0, FLAGS, "mode" },
+    { "color", "set channel coloring", OFFSET(color_mode), AV_OPT_TYPE_INT, {.i64=CHANNEL}, CHANNEL, NB_CLMODES-1, FLAGS, "color" },
+        { "channel",   "separate color for each channel", 0, AV_OPT_TYPE_CONST, {.i64=CHANNEL},   0, 0, FLAGS, "color" },
+        { "intensity", "intensity based coloring",        0, AV_OPT_TYPE_CONST, {.i64=INTENSITY}, 0, 0, FLAGS, "color" },
+        { "rainbow",   "rainbow based coloring",          0, AV_OPT_TYPE_CONST, {.i64=RAINBOW},   0, 0, FLAGS, "color" },
+        { "moreland",  "moreland based coloring",         0, AV_OPT_TYPE_CONST, {.i64=MORELAND},  0, 0, FLAGS, "color" },
+        { "nebulae",   "nebulae based coloring",          0, AV_OPT_TYPE_CONST, {.i64=NEBULAE},   0, 0, FLAGS, "color" },
+        { "fire",      "fire based coloring",             0, AV_OPT_TYPE_CONST, {.i64=FIRE},      0, 0, FLAGS, "color" },
+    { "scale", "set display scale", OFFSET(scale), AV_OPT_TYPE_INT, {.i64=SQRT}, LINEAR, NB_SCALES-1, FLAGS, "scale" },
+        { "sqrt", "square root", 0, AV_OPT_TYPE_CONST, {.i64=SQRT},   0, 0, FLAGS, "scale" },
+        { "cbrt", "cubic root",  0, AV_OPT_TYPE_CONST, {.i64=CBRT},   0, 0, FLAGS, "scale" },
+        { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, "scale" },
+        { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, "scale" },
+    { "saturation", "color saturation multiplier", OFFSET(saturation), AV_OPT_TYPE_FLOAT, {.dbl = 1}, -10, 10, FLAGS },
+    { "win_func", "set window function", OFFSET(win_func), AV_OPT_TYPE_INT, {.i64 = WFUNC_HANNING}, 0, NB_WFUNC-1, FLAGS, "win_func" },
+        { "rect",     "Rectangular",      0, AV_OPT_TYPE_CONST, {.i64=WFUNC_RECT},     0, 0, FLAGS, "win_func" },
+        { "bartlett", "Bartlett",         0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BARTLETT}, 0, 0, FLAGS, "win_func" },
+        { "hann",     "Hann",             0, AV_OPT_TYPE_CONST, {.i64=WFUNC_HANNING},  0, 0, FLAGS, "win_func" },
+        { "hanning",  "Hanning",          0, AV_OPT_TYPE_CONST, {.i64=WFUNC_HANNING},  0, 0, FLAGS, "win_func" },
+        { "hamming",  "Hamming",          0, AV_OPT_TYPE_CONST, {.i64=WFUNC_HAMMING},  0, 0, FLAGS, "win_func" },
+        { "blackman", "Blackman",         0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BLACKMAN}, 0, 0, FLAGS, "win_func" },
+        { "welch",    "Welch",            0, AV_OPT_TYPE_CONST, {.i64=WFUNC_WELCH},    0, 0, FLAGS, "win_func" },
+        { "flattop",  "Flat-top",         0, AV_OPT_TYPE_CONST, {.i64=WFUNC_FLATTOP},  0, 0, FLAGS, "win_func" },
+        { "bharris",  "Blackman-Harris",  0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BHARRIS},  0, 0, FLAGS, "win_func" },
+        { "bnuttall", "Blackman-Nuttall", 0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BNUTTALL}, 0, 0, FLAGS, "win_func" },
+        { "bhann",    "Bartlett-Hann",    0, AV_OPT_TYPE_CONST, {.i64=WFUNC_BHANN},    0, 0, FLAGS, "win_func" },
+        { "sine",     "Sine",             0, AV_OPT_TYPE_CONST, {.i64=WFUNC_SINE},     0, 0, FLAGS, "win_func" },
+        { "nuttall",  "Nuttall",          0, AV_OPT_TYPE_CONST, {.i64=WFUNC_NUTTALL},  0, 0, FLAGS, "win_func" },
+        { "lanczos",  "Lanczos",          0, AV_OPT_TYPE_CONST, {.i64=WFUNC_LANCZOS},  0, 0, FLAGS, "win_func" },
+        { "gauss",    "Gauss",            0, AV_OPT_TYPE_CONST, {.i64=WFUNC_GAUSS},    0, 0, FLAGS, "win_func" },
+    { "orientation", "set orientation", OFFSET(orientation), AV_OPT_TYPE_INT, {.i64=VERTICAL}, 0, NB_ORIENTATIONS-1, FLAGS, "orientation" },
+        { "vertical",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=VERTICAL},   0, 0, FLAGS, "orientation" },
+        { "horizontal", NULL, 0, AV_OPT_TYPE_CONST, {.i64=HORIZONTAL}, 0, 0, FLAGS, "orientation" },
+    { NULL }
+};
+
+AVFILTER_DEFINE_CLASS(showspectrumpic);
+
+static int showspectrumpic_request_frame(AVFilterLink *outlink)
+{
+    ShowSpectrumContext *s = outlink->src->priv;
+    AVFilterLink *inlink = outlink->src->inputs[0];
+    int ret;
+
+    ret = ff_request_frame(inlink);
+    if (ret == AVERROR_EOF && s->outpicref) {
+        int samples = av_audio_fifo_size(s->fifo);
+        int consumed = 0;
+        int sz = s->orientation == VERTICAL ? s->w: s->h;
+        int ch, spf, spb;
+        AVFrame *fin;
+
+        if (samples / sz < s->win_size) {
+            spf = lrint(ceil(samples / (float)sz)) % s->win_size;
+            spb = samples / sz;
+        } else {
+            spf = s->win_size * (samples / (double)((s->win_size * sz) * ceil(samples / (double)(s->win_size * sz))));
+            spb = (samples / (spf * sz)) * spf;
+        }
+
+        if (!spf)
+            spf = s->win_size;
+        s->sliding = FULLFRAME;
+        fin = ff_get_audio_buffer(inlink, s->win_size);
+        if (!fin)
+            return AVERROR(ENOMEM);
+
+        while (av_audio_fifo_size(s->fifo) > 0) {
+            ret = av_audio_fifo_peek(s->fifo, (void **)fin->extended_data, s->win_size);
+            if (ret < 0) {
+                av_frame_free(&fin);
+                return ret;
+            }
+            av_audio_fifo_drain(s->fifo, spf);
+
+            run_rdft(s, fin);
+            acalc_magnitudes(s);
+
+            consumed += spf;
+            if (consumed >= spb) {
+                int h = s->orientation == VERTICAL ? s->h: s->w;
+
+                scale_magnitudes(s, 1. / (consumed / spf));
+                plot_spectrum_column(inlink, fin);
+                consumed = 0;
+                for (ch = 0; ch < s->nb_display_channels; ch++)
+                    memset(s->magnitudes[ch], 0, h * sizeof(float));
+            }
+        }
+
+        av_frame_free(&fin);
+        s->outpicref->pts = 0;
+        ret = ff_filter_frame(outlink, s->outpicref);
+        s->outpicref = NULL;
+    }
+
+    return ret;
+}
+
+static int showspectrumpic_filter_frame(AVFilterLink *inlink, AVFrame *insamples)
+{
+    AVFilterContext *ctx = inlink->dst;
+    ShowSpectrumContext *s = ctx->priv;
+    int ret;
+
+    ret = av_audio_fifo_write(s->fifo, (void **)insamples->extended_data, insamples->nb_samples);
+    av_frame_free(&insamples);
+    return ret;
+}
+
+static const AVFilterPad showspectrumpic_inputs[] = {
+    {
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_AUDIO,
+        .filter_frame = showspectrumpic_filter_frame,
+    },
+    { NULL }
+};
+
+static const AVFilterPad showspectrumpic_outputs[] = {
+    {
+        .name          = "default",
+        .type          = AVMEDIA_TYPE_VIDEO,
+        .config_props  = config_output,
+        .request_frame = showspectrumpic_request_frame,
+    },
+    { NULL }
+};
+
+AVFilter ff_avf_showspectrumpic = {
+    .name          = "showspectrumpic",
+    .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output single picture."),
+    .uninit        = uninit,
+    .query_formats = query_formats,
+    .priv_size     = sizeof(ShowSpectrumContext),
+    .inputs        = showspectrumpic_inputs,
+    .outputs       = showspectrumpic_outputs,
+    .priv_class    = &showspectrumpic_class,
 };
