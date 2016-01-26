@@ -293,6 +293,7 @@ static int dv_decode_video_segment(AVCodecContext *avctx, void *arg)
     int is_field_mode[5];
     int vs_bit_buffer_damaged = 0;
     int mb_bit_buffer_damaged[5] = {0};
+    int mb_concealed[5] = {0};
     int retried = 0;
     int sta;
 
@@ -312,12 +313,18 @@ retry:
         /* skip header */
         quant    = buf_ptr[3] & 0x0f;
         if (avctx->error_concealment) {
-            if ((buf_ptr[3] >> 4) == 0x0E)
+            if ((buf_ptr[3] >> 4) == 0x0E) {
                 vs_bit_buffer_damaged = 1;
+                if (!retried)
+                    mb_concealed[mb_index] = 1;
+            }
             if (!mb_index) {
                 sta = buf_ptr[3] >> 4;
-            } else if (sta != (buf_ptr[3] >> 4))
+            } else if (sta != (buf_ptr[3] >> 4)) {
                 vs_bit_buffer_damaged = 1;
+                if (!retried)
+                    mb_concealed[mb_index] = 2;
+            }
         }
         buf_ptr += 4;
         init_put_bits(&pb, mb_bit_buffer, 80);
@@ -363,8 +370,11 @@ retry:
              * block is finished */
             if (mb->pos >= 64)
                 bit_copy(&pb, &gb);
-            if (mb->pos >= 64 && mb->pos < 127)
+            if (mb->pos >= 64 && mb->pos < 127) {
                 vs_bit_buffer_damaged = mb_bit_buffer_damaged[mb_index] = 1;
+                if (!retried)
+                    mb_concealed[mb_index] = 3;
+            }
 
             block += 64;
             mb++;
@@ -386,8 +396,11 @@ retry:
                 /* if still not finished, no need to parse other blocks */
                 if (mb->pos < 64)
                     break;
-                if (mb->pos < 127)
+                if (mb->pos < 127) {
                     vs_bit_buffer_damaged = mb_bit_buffer_damaged[mb_index] = 1;
+                    if (!retried)
+                        mb_concealed[mb_index] = 4;
+                }
             }
         }
         /* all blocks are finished, so the extra bytes can be used at
@@ -414,6 +427,8 @@ retry:
                 av_log(avctx, AV_LOG_ERROR,
                        "AC EOB marker is absent pos=%d\n", mb->pos);
                 vs_bit_buffer_damaged = 1;
+                if (!retried)
+                    mb_concealed[mb_index] = 5;
             }
             block += 64;
             mb++;
@@ -431,6 +446,16 @@ retry:
     for (mb_index = 0; mb_index < 5; mb_index++) {
         dv_calculate_mb_xy(s, work_chunk, mb_index, &mb_x, &mb_y);
 
+        if (mb_concealed[mb_index]) {
+            int y;
+
+            for (y = 0; y < 8; y++) {
+                int left = s->frame->width - mb_x * 8;
+                int w = left >= 8*s->sys->bpm ? 8*s->sys->bpm : left;
+
+                memset(s->sd->data + (mb_y * 8 + y) * s->frame->width + mb_x * 8, mb_concealed[mb_index], w);
+            }
+        }
         /* idct_put'ting luminance */
         if ((s->sys->pix_fmt == AV_PIX_FMT_YUV420P)                      ||
             (s->sys->pix_fmt == AV_PIX_FMT_YUV411P && mb_x >= (704 / 8)) ||
@@ -549,6 +574,8 @@ static int dvvideo_decode_frame(AVCodecContext *avctx, void *data,
         frame->top_field_first = !(vsc_pack[3] & 0x40);
     }
 
+    s->sd = av_frame_new_side_data(frame, AV_FRAME_DATA_CONCEALED_PIXELS, frame->width * frame->height);
+    memset(s->sd->data, 0, frame->width * frame->height);
     s->buf = buf;
     avctx->execute(avctx, dv_decode_video_segment, s->work_chunks, NULL,
                    dv_work_pool_size(s->sys), sizeof(DVwork_chunk));

@@ -42,6 +42,7 @@
 typedef struct {
     const AVClass *class;
     unsigned mv;
+    unsigned cp;
     int hsub, vsub;
     int qp;
 } CodecViewContext;
@@ -54,6 +55,7 @@ static const AVOption codecview_options[] = {
         {"bf", "forward predicted MVs of B-frames",  0, AV_OPT_TYPE_CONST, {.i64 = MV_B_FOR },  INT_MIN, INT_MAX, FLAGS, "mv"},
         {"bb", "backward predicted MVs of B-frames", 0, AV_OPT_TYPE_CONST, {.i64 = MV_B_BACK }, INT_MIN, INT_MAX, FLAGS, "mv"},
     { "qp", NULL, OFFSET(qp), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, .flags = FLAGS },
+    { "cp", "set concealed pixels to visualize", OFFSET(cp), AV_OPT_TYPE_INT, {.i64=0}, 0, 255, FLAGS },
     { NULL }
 };
 
@@ -238,6 +240,22 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
                     draw_arrow(frame->data[0], mv->dst_x, mv->dst_y, mv->src_x, mv->src_y,
                                frame->width, frame->height, frame->linesize[0],
                                100, 0, mv->source > 0);
+            }
+        }
+    }
+
+    if (s->cp) {
+        AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_CONCEALED_PIXELS);
+        if (sd) {
+            int x, y;
+            for (y = 0; y < frame->height; y++) {
+                for (x = 0; x < frame->width; x++) {
+                    uint8_t ct = sd->data[y * frame->width + x];
+
+                    if (ct == s->cp) {
+                        frame->data[0][frame->linesize[0] * y + x] = 255-ct;
+                    }
+                }
             }
         }
     }

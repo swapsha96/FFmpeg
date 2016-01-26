@@ -121,7 +121,12 @@ enum AVFrameSideDataType {
      * The GOP timecode in 25 bit timecode format. Data format is 64-bit integer.
      * This is set on the first frame of a GOP that has a temporal reference of 0.
      */
-    AV_FRAME_DATA_GOP_TIMECODE
+    AV_FRAME_DATA_GOP_TIMECODE,
+    /**
+      * width x height uint8_t array, each byte represents one pixel,
+      * if byte is set to >0, that means corresponding pixel is concealed.
+     */
+    AV_FRAME_DATA_CONCEALED_PIXELS,
 };
 
 enum AVActiveFormatDescription {

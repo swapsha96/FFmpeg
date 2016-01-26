@@ -41,6 +41,7 @@ typedef struct DVVideoContext {
     const AVDVProfile *sys;
     const AVFrame   *frame;
     AVCodecContext  *avctx;
+    AVFrameSideData *sd;
     uint8_t         *buf;
 
     uint8_t dv_zigzag[2][64];
