@@ -122,6 +122,7 @@ OBJS-$(CONFIG_BLEND_FILTER)                  += vf_blend.o dualinput.o framesync
 OBJS-$(CONFIG_BOXBLUR_FILTER)                += vf_boxblur.o
 OBJS-$(CONFIG_BWDIF_FILTER)                  += vf_bwdif.o
 OBJS-$(CONFIG_CHROMAKEY_FILTER)              += vf_chromakey.o
+OBJS-$(CONFIG_CHROMASCOPE_FILTER)            += vf_chromascope.o
 OBJS-$(CONFIG_CODECVIEW_FILTER)              += vf_codecview.o
 OBJS-$(CONFIG_COLORBALANCE_FILTER)           += vf_colorbalance.o
 OBJS-$(CONFIG_COLORCHANNELMIXER_FILTER)      += vf_colorchannelmixer.o
