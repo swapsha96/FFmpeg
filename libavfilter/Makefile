@@ -298,6 +298,7 @@ OBJS-$(CONFIG_SPECTRUMSYNTH_FILTER)          += vaf_spectrumsynth.o window_func.
 
 # multimedia sources
 OBJS-$(CONFIG_AMOVIE_FILTER)                 += src_movie.o
+OBJS-$(CONFIG_LUASCRIPT_FILTER)              += src_luascript.o
 OBJS-$(CONFIG_MOVIE_FILTER)                  += src_movie.o
 
 # Windows resource file

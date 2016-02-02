@@ -318,6 +318,7 @@ void avfilter_register_all(void)
 
     /* multimedia sources */
     REGISTER_FILTER(AMOVIE,         amovie,         avsrc);
+    REGISTER_FILTER(LUASCRIPT,      luascript,      avsrc);
     REGISTER_FILTER(MOVIE,          movie,          avsrc);
 
     /* those filters are part of public or internal API => registered

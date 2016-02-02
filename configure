@@ -275,6 +275,7 @@ External library support:
   --disable-lzma           disable lzma [autodetect]
   --enable-decklink        enable Blackmagic DeckLink I/O support [no]
   --enable-mmal            enable decoding via MMAL [no]
+  --enable-lua51           enable lua5.1, needed for luascript filter [no]
   --enable-netcdf          enable NetCDF, needed for sofalizer filter [no]
   --enable-nvenc           enable NVIDIA NVENC support [no]
   --enable-openal          enable OpenAL 1.1 capture support [no]
@@ -1494,6 +1495,7 @@ EXTERNAL_LIBRARY_LIST="
     libzimg
     libzmq
     libzvbi
+    lua51
     lzma
     mmal
     netcdf
@@ -2867,6 +2869,7 @@ hqdn3d_filter_deps="gpl"
 interlace_filter_deps="gpl"
 kerndeint_filter_deps="gpl"
 ladspa_filter_deps="ladspa dlopen"
+luascript_filter_deps="lua51"
 mcdeint_filter_deps="avcodec gpl"
 movie_filter_deps="avcodec avformat"
 mpdecimate_filter_deps="gpl"
@@ -5577,6 +5580,7 @@ enabled mmal &&
     (check_code cc interface/mmal/mmal.h "MMAL_PARAMETER_VIDEO_MAX_NUM_CALLBACKS" ||
      die "ERROR: mmal firmware headers too old")
 
+enabled lua51             && require_pkg_config lua5.1 lua.h lua_newstate
 enabled netcdf            && require_pkg_config netcdf netcdf.h nc_inq_libvers
 enabled nvenc             && { check_header nvEncodeAPI.h || die "ERROR: nvEncodeAPI.h not found."; } &&
                              { check_cpp_condition nvEncodeAPI.h "NVENCAPI_MAJOR_VERSION >= 5" ||
