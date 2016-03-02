@@ -316,7 +316,7 @@ static int resample_cubic(AVFilterContext *ctx, void *arg,
                         else if (ix >= w)
                             ix = w - 1;
 
-                        sum += s->coeff[subU][dx] * s->coeff[subV][dy] * src[ ix + iy * src_linesize];
+                        //sum += s->coeff[subU][dx] * s->coeff[subV][dy] * src[ ix + iy * src_linesize];
                     }
                 }
             }
@@ -377,6 +377,7 @@ static int resample_linear(AVFilterContext *ctx, void *arg,
                     index = u + v * src_linesize;
                     sum   = subUI * src[index] + subU * src[index + 1];
                     sum   = (sum + (1 << (SUB_PIXEL_BITS - 1))) >> SUB_PIXEL_BITS;
+                    sum   = 0;
                 }
             } else {
                 if (u < 0)
@@ -394,6 +395,7 @@ static int resample_linear(AVFilterContext *ctx, void *arg,
                         v = h - 1;
                     index = u + v * src_linesize;
                     sum   = src[index];
+                    sum   = 0;
                 }
             }
 
