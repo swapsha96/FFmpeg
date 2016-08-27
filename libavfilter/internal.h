@@ -402,4 +402,9 @@ static inline int ff_norm_qscale(int qscale, int type)
     return qscale;
 }
 
+/**
+ * Get number of threads for current filter instance.
+ */
+int ff_filter_get_nb_threads(AVFilterContext *ctx);
+
 #endif /* AVFILTER_INTERNAL_H */
