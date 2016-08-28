@@ -43,6 +43,7 @@ static const AVOption filtergraph_options[] = {
     { "thread_type", "Allowed thread types", OFFSET(thread_type), AV_OPT_TYPE_FLAGS,
         { .i64 = AVFILTER_THREAD_SLICE }, 0, INT_MAX, FLAGS, "thread_type" },
         { "slice", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AVFILTER_THREAD_SLICE }, .flags = FLAGS, .unit = "thread_type" },
+        { "frame", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AVFILTER_THREAD_FRAME }, .flags = FLAGS, .unit = "thread_type" },
     { "threads",     "Maximum number of threads", OFFSET(nb_threads),
         AV_OPT_TYPE_INT,   { .i64 = 0 }, 0, INT_MAX, FLAGS },
     {"scale_sws_opts"       , "default scale filter options"        , OFFSET(scale_sws_opts)        ,

@@ -615,6 +615,7 @@ static const AVOption avfilter_options[] = {
     { "thread_type", "Allowed thread types", OFFSET(thread_type), AV_OPT_TYPE_FLAGS,
         { .i64 = AVFILTER_THREAD_SLICE }, 0, INT_MAX, FLAGS, "thread_type" },
         { "slice", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AVFILTER_THREAD_SLICE }, .unit = "thread_type" },
+        { "frame", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = AVFILTER_THREAD_FRAME }, .unit = "thread_type" },
     { "enable", "set enable expression", OFFSET(enable_str), AV_OPT_TYPE_STRING, {.str=NULL}, .flags = FLAGS },
     { "threads", "Allowed number of threads", OFFSET(nb_threads), AV_OPT_TYPE_INT,
         { .i64 = 0 }, 0, INT_MAX, FLAGS },
@@ -890,6 +891,9 @@ int avfilter_init_dict(AVFilterContext *ctx, AVDictionary **options)
         ctx->graph->internal->thread_execute) {
         ctx->thread_type       = AVFILTER_THREAD_SLICE;
         ctx->internal->execute = ctx->graph->internal->thread_execute;
+    } else if (ctx->filter->flags & AVFILTER_FLAG_FRAME_THREADS &&
+        ctx->thread_type & ctx->graph->thread_type & AVFILTER_THREAD_FRAME) {
+        ctx->thread_type       = AVFILTER_THREAD_FRAME;
     } else {
         ctx->thread_type = 0;
     }

@@ -150,7 +150,8 @@ struct AVFilterGraphInternal {
 };
 
 struct AVFilterInternal {
-    avfilter_execute_func *execute;
+    avfilter_execute_func *execute;  ///< for slice-threads
+    void *thread_ctx;                ///< for frame-threads
 };
 
 /**

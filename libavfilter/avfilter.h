@@ -115,6 +115,10 @@ enum AVMediaType avfilter_pad_get_type(const AVFilterPad *pads, int pad_idx);
  */
 #define AVFILTER_FLAG_SLICE_THREADS         (1 << 2)
 /**
+ * The filter supports frame level multithreading.
+ */
+#define AVFILTER_FLAG_FRAME_THREADS         (1 << 3)
+/**
  * Some filters support a generic "enable" expression option that can be used
  * to enable or disable a filter in the timeline. Filters supporting this
  * option have this flag set. When the enable expression is false, the default
@@ -300,6 +304,10 @@ typedef struct AVFilter {
  * Process multiple parts of the frame concurrently.
  */
 #define AVFILTER_THREAD_SLICE (1 << 0)
+/**
+ * Process multiple frames of the filter concurrently.
+ */
+#define AVFILTER_THREAD_FRAME (2 << 0)
 
 typedef struct AVFilterInternal AVFilterInternal;
 
