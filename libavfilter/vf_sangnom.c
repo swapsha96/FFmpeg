@@ -120,10 +120,10 @@ static inline void copy_field(const uint8_t *srcp, const int src_stride,
 
 static inline uint8_t absdiff(int a, int b)
 {
-    return FFABS(a - b);
+    return av_clip_uint8(FFABS(a - b));
 }
 
-static inline uint8_t load_pixel(const uint8_t *srcp, int curPos, int offset, int width)
+static inline int16_t load_pixel(const uint8_t *srcp, int curPos, int offset, int width)
 {
     int reqPos = curPos + offset;
 
@@ -149,11 +149,11 @@ static inline int16_t load_pixel_i16(const int16_t *srcp, int curPos, int offset
     return srcp[0];
 }
 
-static inline uint8_t calculate_sangnom(const uint8_t p1, const uint8_t p2, const uint8_t p3)
+static inline int16_t calculate_sangnom(const uint8_t p1, const uint8_t p2, const uint8_t p3)
 {
     int sum = p1 * 5 + p2 * 4 - p3;
 
-    return sum / 8;
+    return av_clip_int16(sum / 8);
 }
 
 static inline void prepare_buffers(const uint8_t *srcp, const int src_stride,
@@ -166,26 +166,26 @@ static inline void prepare_buffers(const uint8_t *srcp, const int src_stride,
 
     for (y = 0; y < h / 2 - 1; ++y) {
         for (x = 0; x < w; ++x) {
-            const uint8_t currLineM3 = load_pixel(srcp, x, -3, w);
-            const uint8_t currLineM2 = load_pixel(srcp, x, -2, w);
-            const uint8_t currLineM1 = load_pixel(srcp, x, -1, w);
-            const uint8_t currLine   = srcp[x];
-            const uint8_t currLineP1 = load_pixel(srcp, x, 1, w);
-            const uint8_t currLineP2 = load_pixel(srcp, x, 2, w);
-            const uint8_t currLineP3 = load_pixel(srcp, x, 3, w);
+            const int16_t currLineM3 = load_pixel(srcp, x, -3, w);
+            const int16_t currLineM2 = load_pixel(srcp, x, -2, w);
+            const int16_t currLineM1 = load_pixel(srcp, x, -1, w);
+            const int16_t currLine   = srcp[x];
+            const int16_t currLineP1 = load_pixel(srcp, x, 1, w);
+            const int16_t currLineP2 = load_pixel(srcp, x, 2, w);
+            const int16_t currLineP3 = load_pixel(srcp, x, 3, w);
 
-            const uint8_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
-            const uint8_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
-            const uint8_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
-            const uint8_t nextLine   = srcpn2[x];
-            const uint8_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
-            const uint8_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
-            const uint8_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
+            const int16_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
+            const int16_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
+            const int16_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
+            const int16_t nextLine   = srcpn2[x];
+            const int16_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
+            const int16_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
+            const int16_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
 
-            const uint8_t forwardSangNom1 = calculate_sangnom(currLineM1, currLine, currLineP1);
-            const uint8_t forwardSangNom2 = calculate_sangnom(nextLineP1, nextLine, nextLineM1);
-            const uint8_t backwardSangNom1 = calculate_sangnom(currLineP1, currLine, currLineM1);
-            const uint8_t backwardSangNom2 = calculate_sangnom(nextLineM1, nextLine, nextLineP1);
+            const int16_t forwardSangNom1 = calculate_sangnom(currLineM1, currLine, currLineP1);
+            const int16_t forwardSangNom2 = calculate_sangnom(nextLineP1, nextLine, nextLineM1);
+            const int16_t backwardSangNom1 = calculate_sangnom(currLineP1, currLine, currLineM1);
+            const int16_t backwardSangNom2 = calculate_sangnom(nextLineM1, nextLine, nextLineP1);
 
             buffers[ADIFF_M3_P3][buffer_offset + x] = absdiff(currLineM3, nextLineP3);
             buffers[ADIFF_M2_P2][buffer_offset + x] = absdiff(currLineM2, nextLineP2);
@@ -218,29 +218,29 @@ static inline void finalize_plane(const uint8_t *srcp, const int src_stride,
 
     for (y = 0; y < h / 2 - 1; ++y) {
         for (x = 0; x < w; ++x) {
-            const uint8_t currLineM3 = load_pixel(srcp, x, -3, w);
-            const uint8_t currLineM2 = load_pixel(srcp, x, -2, w);
-            const uint8_t currLineM1 = load_pixel(srcp, x, -1, w);
-            const uint8_t currLine   = srcp[x];
-            const uint8_t currLineP1 = load_pixel(srcp, x, 1, w);
-            const uint8_t currLineP2 = load_pixel(srcp, x, 2, w);
-            const uint8_t currLineP3 = load_pixel(srcp, x, 3, w);
+            const uint16_t currLineM3 = load_pixel(srcp, x, -3, w);
+            const uint16_t currLineM2 = load_pixel(srcp, x, -2, w);
+            const uint16_t currLineM1 = load_pixel(srcp, x, -1, w);
+            const uint16_t currLine   = srcp[x];
+            const uint16_t currLineP1 = load_pixel(srcp, x, 1, w);
+            const uint16_t currLineP2 = load_pixel(srcp, x, 2, w);
+            const uint16_t currLineP3 = load_pixel(srcp, x, 3, w);
 
-            const uint8_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
-            const uint8_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
-            const uint8_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
-            const uint8_t nextLine   = srcpn2[x];
-            const uint8_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
-            const uint8_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
-            const uint8_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
+            const uint16_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
+            const uint16_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
+            const uint16_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
+            const uint16_t nextLine   = srcpn2[x];
+            const uint16_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
+            const uint16_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
+            const uint16_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
 
-            const uint8_t forwardSangNom1 = calculate_sangnom(currLineM1, currLine, currLineP1);
-            const uint8_t forwardSangNom2 = calculate_sangnom(nextLineP1, nextLine, nextLineM1);
-            const uint8_t backwardSangNom1 = calculate_sangnom(currLineP1, currLine, currLineM1);
-            const uint8_t backwardSangNom2 = calculate_sangnom(nextLineM1, nextLine, nextLineP1);
+            const int16_t forwardSangNom1 = calculate_sangnom(currLineM1, currLine, currLineP1);
+            const int16_t forwardSangNom2 = calculate_sangnom(nextLineP1, nextLine, nextLineM1);
+            const int16_t backwardSangNom1 = calculate_sangnom(currLineP1, currLine, currLineM1);
+            const int16_t backwardSangNom2 = calculate_sangnom(nextLineM1, nextLine, nextLineP1);
 
-            uint8_t buf[9];
-            uint8_t minbuf;
+            int16_t buf[9];
+            int16_t minbuf;
 
             buf[0] = buffers[ADIFF_M3_P3][bufferOffset + x];
             buf[1] = buffers[ADIFF_M2_P2][bufferOffset + x];
