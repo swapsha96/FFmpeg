@@ -300,13 +300,13 @@ static inline void process_buffers_org(uint8_t *bufferp, int16_t *buffer_temp, c
         }
 
         for (x = 0; x < buffer_stride; ++x) {
-            const uint8_t currLineM3 = load_pixel_i16(buffer_tempc, x, -3, buffer_stride);
-            const uint8_t currLineM2 = load_pixel_i16(buffer_tempc, x, -2, buffer_stride);
-            const uint8_t currLineM1 = load_pixel_i16(buffer_tempc, x, -1, buffer_stride);
-            const uint8_t currLine   = buffer_tempc[x];
-            const uint8_t currLineP1 = load_pixel_i16(buffer_tempc, x, 1, buffer_stride);
-            const uint8_t currLineP2 = load_pixel_i16(buffer_tempc, x, 2, buffer_stride);
-            const uint8_t currLineP3 = load_pixel_i16(buffer_tempc, x, 3, buffer_stride);
+            const int16_t currLineM3 = load_pixel_i16(buffer_tempc, x, -3, buffer_stride);
+            const int16_t currLineM2 = load_pixel_i16(buffer_tempc, x, -2, buffer_stride);
+            const int16_t currLineM1 = load_pixel_i16(buffer_tempc, x, -1, buffer_stride);
+            const int16_t currLine   = buffer_tempc[x];
+            const int16_t currLineP1 = load_pixel_i16(buffer_tempc, x, 1, buffer_stride);
+            const int16_t currLineP2 = load_pixel_i16(buffer_tempc, x, 2, buffer_stride);
+            const int16_t currLineP3 = load_pixel_i16(buffer_tempc, x, 3, buffer_stride);
 
             bufferpc[x] = (currLineM3 + currLineM2 + currLineM1 + currLine + currLineP1 + currLineP2 + currLineP3) / 16;
         }
@@ -340,6 +340,8 @@ static void filter(AVFilterContext *ctx, AVFrame *dst)
 
         copy_field(s->src->data[p], s->src->linesize[p],
                    dst->data[p], dst->linesize[p], w, h, s);
+
+        prepare_buffers(srcp + s->offset * src_stride, src_stride, w, h, s->buffer_stride, s->buffers);
 
         for (i = 0; i < TOTAL_BUFFERS; ++i)
             process_buffers_org(s->buffers[i], s->buffer_temp, s->buffer_stride, s->buffer_height);
