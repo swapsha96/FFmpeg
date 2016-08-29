@@ -265,6 +265,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(REVERSE,        reverse,        vf);
     REGISTER_FILTER(ROTATE,         rotate,         vf);
     REGISTER_FILTER(SAB,            sab,            vf);
+    REGISTER_FILTER(SANGNOM,        sangnom,        vf);
     REGISTER_FILTER(SCALE,          scale,          vf);
     REGISTER_FILTER(SCALE_NPP,      scale_npp,      vf);
     REGISTER_FILTER(SCALE_VAAPI,    scale_vaapi,    vf);

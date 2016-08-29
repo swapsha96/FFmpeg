@@ -249,6 +249,7 @@ OBJS-$(CONFIG_REPEATFIELDS_FILTER)           += vf_repeatfields.o
 OBJS-$(CONFIG_REVERSE_FILTER)                += f_reverse.o
 OBJS-$(CONFIG_ROTATE_FILTER)                 += vf_rotate.o
 OBJS-$(CONFIG_SAB_FILTER)                    += vf_sab.o
+OBJS-$(CONFIG_SANGNOM_FILTER)                += vf_sangnom.o
 OBJS-$(CONFIG_SCALE_FILTER)                  += vf_scale.o
 OBJS-$(CONFIG_SCALE_NPP_FILTER)              += vf_scale_npp.o
 OBJS-$(CONFIG_SCALE_VAAPI_FILTER)            += vf_scale_vaapi.o
