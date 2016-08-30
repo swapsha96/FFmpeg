@@ -218,21 +218,21 @@ static inline void finalize_plane(const uint8_t *srcp, const int src_stride,
 
     for (y = 0; y < h / 2 - 1; ++y) {
         for (x = 0; x < w; ++x) {
-            const uint16_t currLineM3 = load_pixel(srcp, x, -3, w);
-            const uint16_t currLineM2 = load_pixel(srcp, x, -2, w);
-            const uint16_t currLineM1 = load_pixel(srcp, x, -1, w);
-            const uint16_t currLine   = srcp[x];
-            const uint16_t currLineP1 = load_pixel(srcp, x, 1, w);
-            const uint16_t currLineP2 = load_pixel(srcp, x, 2, w);
-            const uint16_t currLineP3 = load_pixel(srcp, x, 3, w);
+            const int16_t currLineM3 = load_pixel(srcp, x, -3, w);
+            const int16_t currLineM2 = load_pixel(srcp, x, -2, w);
+            const int16_t currLineM1 = load_pixel(srcp, x, -1, w);
+            const int16_t currLine   = srcp[x];
+            const int16_t currLineP1 = load_pixel(srcp, x, 1, w);
+            const int16_t currLineP2 = load_pixel(srcp, x, 2, w);
+            const int16_t currLineP3 = load_pixel(srcp, x, 3, w);
 
-            const uint16_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
-            const uint16_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
-            const uint16_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
-            const uint16_t nextLine   = srcpn2[x];
-            const uint16_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
-            const uint16_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
-            const uint16_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
+            const int16_t nextLineM3 = load_pixel(srcpn2, x, -3, w);
+            const int16_t nextLineM2 = load_pixel(srcpn2, x, -2, w);
+            const int16_t nextLineM1 = load_pixel(srcpn2, x, -1, w);
+            const int16_t nextLine   = srcpn2[x];
+            const int16_t nextLineP1 = load_pixel(srcpn2, x, 1, w);
+            const int16_t nextLineP2 = load_pixel(srcpn2, x, 2, w);
+            const int16_t nextLineP3 = load_pixel(srcpn2, x, 3, w);
 
             const int16_t forwardSangNom1 = calculate_sangnom(currLineM1, currLine, currLineP1);
             const int16_t forwardSangNom2 = calculate_sangnom(nextLineP1, nextLine, nextLineM1);
