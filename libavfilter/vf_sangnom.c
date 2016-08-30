@@ -83,6 +83,7 @@ typedef struct SangNomContext {
     int parity;         ///< SANGNOMParity
     int deint;          ///< SANGNOMDeint
     int aa;
+    int algo;
 
     AVFrame *src;
     AVFrame *second;
@@ -317,6 +318,47 @@ static inline void process_buffers_org(uint8_t *bufferp, int16_t *buffer_temp, c
     }
 }
 
+static inline void process_buffers_new(uint8_t *bufferp, int16_t *buffer_temp,
+                                       const int buffer_stride, const int buffer_height)
+{
+    uint8_t *bufferpc = bufferp + buffer_stride;
+    uint8_t *bufferpp1 = bufferpc - buffer_stride;
+    uint8_t *bufferpn1 = bufferpc + buffer_stride;
+    int16_t *buffer_tempc = buffer_temp + buffer_stride;
+    int y, x;
+
+    for (y = 0; y < buffer_height - 1; ++y) {
+        for (x = 0; x < buffer_stride; ++x) {
+            buffer_tempc[x] = bufferpp1[x] + bufferpc[x] + bufferpn1[x];
+        }
+
+        bufferpc += buffer_stride;
+        bufferpp1 += buffer_stride;
+        bufferpn1 += buffer_stride;
+        buffer_tempc += buffer_stride;
+    }
+
+    bufferpc = bufferp + buffer_stride;
+    buffer_tempc = buffer_temp + buffer_stride;
+
+    for (y = 0; y < buffer_height - 1; ++y) {
+        for (x = 0; x < buffer_stride; ++x) {
+            const int16_t currLineM3 = load_pixel_i16(buffer_tempc, x, -3, buffer_stride);
+            const int16_t currLineM2 = load_pixel_i16(buffer_tempc, x, -2, buffer_stride);
+            const int16_t currLineM1 = load_pixel_i16(buffer_tempc, x, -1, buffer_stride);
+            const int16_t currLine   = buffer_tempc[x];
+            const int16_t currLineP1 = load_pixel_i16(buffer_tempc, x, 1, buffer_stride);
+            const int16_t currLineP2 = load_pixel_i16(buffer_tempc, x, 2, buffer_stride);
+            const int16_t currLineP3 = load_pixel_i16(buffer_tempc, x, 3, buffer_stride);
+
+            bufferpc[x] = (currLineM3 + currLineM2 + currLineM1 + currLine + currLineP1 + currLineP2 + currLineP3) / 16;
+        }
+
+        bufferpc += buffer_stride;
+        buffer_tempc += buffer_stride;
+    }
+}
+
 static void filter(AVFilterContext *ctx, AVFrame *dst)
 {
     SangNomContext *s = ctx->priv;
@@ -343,8 +385,13 @@ static void filter(AVFilterContext *ctx, AVFrame *dst)
 
         prepare_buffers(srcp + s->offset * src_stride, src_stride, w, h, s->buffer_stride, s->buffers);
 
-        for (i = 0; i < TOTAL_BUFFERS; ++i)
-            process_buffers_org(s->buffers[i], s->buffer_temp, s->buffer_stride, s->buffer_height);
+        if (s->algo = 0) {
+            for (i = 0; i < TOTAL_BUFFERS; ++i)
+                process_buffers_org(s->buffers[i], s->buffer_temp, s->buffer_stride, s->buffer_height);
+        } else {
+            for (i = 0; i < TOTAL_BUFFERS; ++i)
+                process_buffers_new(s->buffers[i], s->buffer_temp, s->buffer_stride, s->buffer_height);
+        }
 
         finalize_plane(srcp + s->offset * src_stride, src_stride,
                        dstp + s->offset * dst_stride, dst_stride,
@@ -500,7 +547,6 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P,
         AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ420P,
         AV_PIX_FMT_YUVJ411P,
-        AV_PIX_FMT_GBRP,
         AV_PIX_FMT_GRAY8,
         AV_PIX_FMT_NONE
     };
@@ -573,6 +619,7 @@ static const AVOption sangnom_options[] = {
     CONST("interlaced", "only deinterlace frames marked as interlaced", SANGNOM_DEINT_INTERLACED,  "deint"),
 
     { "aa", "specify the strength of anti-aliasing", OFFSET(aa), AV_OPT_TYPE_INT, {.i64=48}, 0, 128, FLAGS },
+    { "algo", "specify the algorithm", OFFSET(algo), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS },
     { NULL }
 };
 
