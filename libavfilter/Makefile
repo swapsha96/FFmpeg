@@ -308,6 +308,7 @@ OBJS-$(CONFIG_ALLYUV_FILTER)                 += vsrc_testsrc.o
 OBJS-$(CONFIG_CELLAUTO_FILTER)               += vsrc_cellauto.o
 OBJS-$(CONFIG_COLOR_FILTER)                  += vsrc_testsrc.o
 OBJS-$(CONFIG_COREIMAGESRC_FILTER)           += vf_coreimage.o
+OBJS-$(CONFIG_CUBE_FILTER)                   += vsrc_cube.o
 OBJS-$(CONFIG_FREI0R_SRC_FILTER)             += vf_frei0r.o
 OBJS-$(CONFIG_HALDCLUTSRC_FILTER)            += vsrc_testsrc.o
 OBJS-$(CONFIG_LIFE_FILTER)                   += vsrc_life.o

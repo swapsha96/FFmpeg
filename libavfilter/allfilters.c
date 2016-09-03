@@ -324,6 +324,7 @@ void avfilter_register_all(void)
     REGISTER_FILTER(CELLAUTO,       cellauto,       vsrc);
     REGISTER_FILTER(COLOR,          color,          vsrc);
     REGISTER_FILTER(COREIMAGESRC,   coreimagesrc,   vsrc);
+    REGISTER_FILTER(CUBE,           cube,           vsrc);
     REGISTER_FILTER(FREI0R,         frei0r_src,     vsrc);
     REGISTER_FILTER(HALDCLUTSRC,    haldclutsrc,    vsrc);
     REGISTER_FILTER(LIFE,           life,           vsrc);
