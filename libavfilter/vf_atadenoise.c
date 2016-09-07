@@ -39,11 +39,19 @@
 
 #define SIZE FF_BUFQUEUE_SIZE
 
+typedef struct ATAStats {
+    int lsum;
+    int rsum;
+    uint8_t left;
+    uint8_t right;
+} ATAStats;
+
 typedef struct ATADenoiseContext {
     const AVClass *class;
 
     float fthra[4], fthrb[4];
     int thra[4], thrb[4];
+    int algo;
 
     int planes;
     int nb_planes;
@@ -55,6 +63,7 @@ typedef struct ATADenoiseContext {
     int linesize[4][SIZE];
     int size, mid;
     int available;
+    ATAStats *stats[4];
 
     int (*filter_slice)(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs);
 } ATADenoiseContext;
@@ -71,6 +80,9 @@ static const AVOption atadenoise_options[] = {
     { "2b", "set threshold B for 3rd plane", OFFSET(fthrb[2]), AV_OPT_TYPE_FLOAT, {.dbl=0.04}, 0, 5.0, FLAGS },
     { "s",  "set how many frames to use",    OFFSET(size),     AV_OPT_TYPE_INT,   {.i64=9},   5, SIZE, FLAGS },
     { "p",  "set what planes to filter",     OFFSET(planes),   AV_OPT_TYPE_FLAGS, {.i64=7},    0, 15,  FLAGS },
+    { "a",  "set algorithm to use",          OFFSET(algo),     AV_OPT_TYPE_INT,   {.i64=0},    0,  1,  FLAGS, "algo" },
+        { "old", NULL,                       0,                AV_OPT_TYPE_CONST, {.i64=0},    0,  0,  FLAGS, "algo" },
+        { "new", NULL,                       0,                AV_OPT_TYPE_CONST, {.i64=1},    0,  0,  FLAGS, "algo" },
     { NULL }
 };
 
@@ -112,7 +124,7 @@ static av_cold int init(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_ERROR, "size %d is invalid. Must be an odd value.\n", s->size);
         return AVERROR(EINVAL);
     }
-    s->mid = s->size / 2 + 1;
+    s->mid = s->size / 2;
 
     return 0;
 }
@@ -120,6 +132,202 @@ static av_cold int init(AVFilterContext *ctx)
 typedef struct ThreadData {
     AVFrame *in, *out;
 } ThreadData;
+
+static int filter_slice8_new(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
+{
+    ATADenoiseContext *s = ctx->priv;
+    ThreadData *td = arg;
+    AVFrame *in = td->in;
+    AVFrame *out = td->out;
+    const int size = s->size;
+    const int mid = s->mid;
+    int p, x, y, i, j;
+
+    for (p = 0; p < s->nb_planes; p++) {
+        const int h = s->planeheight[p];
+        const int w = s->planewidth[p];
+        const int slice_start = (h * jobnr) / nb_jobs;
+        const int slice_end = (h * (jobnr+1)) / nb_jobs;
+        const uint8_t *src = in->data[p] + slice_start * in->linesize[p];
+        uint8_t *dst = out->data[p] + slice_start * out->linesize[p];
+        const int thra = s->thra[p];
+        const uint8_t **data = (const uint8_t **)s->data[p];
+        const int *linesize = (const int *)s->linesize[p];
+        const uint8_t *srcf[SIZE];
+
+        if (!((1 << p) & s->planes)) {
+            av_image_copy_plane(dst, out->linesize[p], src, in->linesize[p],
+                                w, slice_end - slice_start);
+            continue;
+        }
+
+        for (i = 0; i < size; i++)
+            srcf[i] = data[i] + slice_start * linesize[i];
+
+        for (y = slice_start; y < slice_end; y++) {
+            for (x = 0; x < w; x++) {
+                ATAStats *stats = &s->stats[p][y * w + x];
+                const int srcx = src[x];
+                int rsum = stats->rsum;
+                int lsum = stats->lsum;
+                int r = stats->right;
+                int l = stats->left;
+                int srcix, srcjx;
+                int ldiff, rdiff;
+
+                for (j = mid - 1 - l, i = mid + 1 + r; j >= 0 && i < size; j--, i++) {
+                    srcjx = srcf[j][x];
+
+                    ldiff = FFABS(srcx - srcjx);
+                    if (ldiff > thra)
+                        break;
+                    l++;
+                    lsum += srcjx;
+
+                    srcix = srcf[i][x];
+
+                    rdiff = FFABS(srcx - srcix);
+                    if (rdiff > thra)
+                        break;
+                    r++;
+                    rsum += srcix;
+                }
+
+                dst[x] = (rsum + lsum + srcx) / (l + r + 1);
+
+                if (!r) {
+                    lsum = 0;
+                    l = 0;
+                } else {
+                    rsum -= srcf[mid+1][x];
+                    r--;
+                }
+
+                if (l) {
+                    lsum += srcx;
+                    lsum -= srcf[j+1][x];
+                }
+
+                stats->left = l;
+                stats->lsum = lsum;
+                stats->right = r;
+                stats->rsum = rsum;
+
+                av_assert2(srcf[mid][x] == srcx);
+                av_assert2(stats->left <= mid);
+                av_assert2(stats->right <= mid);
+                av_assert2(stats->rsum >= 0);
+                av_assert2(stats->lsum >= 0);
+            }
+
+            dst += out->linesize[p];
+            src += in->linesize[p];
+
+            for (i = 0; i < size; i++)
+                srcf[i] += linesize[i];
+        }
+    }
+
+    return 0;
+}
+
+static int filter_slice16_new(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
+{
+    ATADenoiseContext *s = ctx->priv;
+    ThreadData *td = arg;
+    AVFrame *in = td->in;
+    AVFrame *out = td->out;
+    const int size = s->size;
+    const int mid = s->mid;
+    int p, x, y, i, j;
+
+    for (p = 0; p < s->nb_planes; p++) {
+        const int h = s->planeheight[p];
+        const int w = s->planewidth[p];
+        const int slice_start = (h * jobnr) / nb_jobs;
+        const int slice_end = (h * (jobnr+1)) / nb_jobs;
+        const uint16_t *src = (const uint16_t *)(in->data[p] + slice_start * in->linesize[p]);
+        uint16_t *dst = (uint16_t *)(out->data[p] + slice_start * out->linesize[p]);
+        const int thra = s->thra[p];
+        const uint8_t **data = (const uint8_t **)s->data[p];
+        const int *linesize = (const int *)s->linesize[p];
+        const uint16_t *srcf[SIZE];
+
+        if (!((1 << p) & s->planes)) {
+            av_image_copy_plane((uint8_t *)dst, out->linesize[p], (uint8_t *)src, in->linesize[p],
+                                w, slice_end - slice_start);
+            continue;
+        }
+
+        for (i = 0; i < size; i++)
+            srcf[i] = (const uint16_t *)(data[i] + slice_start * linesize[i]);
+
+        for (y = slice_start; y < slice_end; y++) {
+            for (x = 0; x < w; x++) {
+                ATAStats *stats = &s->stats[p][y * w + x];
+                const int srcx = src[x];
+                int rsum = stats->rsum;
+                int lsum = stats->lsum;
+                int r = stats->right;
+                int l = stats->left;
+                int srcix, srcjx;
+                int ldiff, rdiff;
+
+                for (j = mid - 1 - l, i = mid + 1 + r; j >= 0 && i < size; j--, i++) {
+                    srcjx = srcf[j][x];
+
+                    ldiff = FFABS(srcx - srcjx);
+                    if (ldiff > thra)
+                        break;
+                    l++;
+                    lsum += srcjx;
+
+                    srcix = srcf[i][x];
+
+                    rdiff = FFABS(srcx - srcix);
+                    if (rdiff > thra)
+                        break;
+                    r++;
+                    rsum += srcix;
+                }
+
+                dst[x] = (rsum + lsum + srcx) / (l + r + 1);
+
+                if (!r) {
+                    lsum = 0;
+                    l = 0;
+                } else {
+                    rsum -= srcf[mid+1][x];
+                    r--;
+                }
+
+                if (l) {
+                    lsum += srcx;
+                    lsum -= srcf[j+1][x];
+                }
+
+                stats->left = l;
+                stats->lsum = lsum;
+                stats->right = r;
+                stats->rsum = rsum;
+
+                av_assert2(srcf[mid][x] == srcx);
+                av_assert2(stats->left <= mid);
+                av_assert2(stats->right <= mid);
+                av_assert2(stats->rsum >= 0);
+                av_assert2(stats->lsum >= 0);
+            }
+
+            dst += out->linesize[p] / 2;
+            src += in->linesize[p] / 2;
+
+            for (i = 0; i < size; i++)
+                srcf[i] += linesize[i] / 2;
+        }
+    }
+
+    return 0;
+}
 
 static int filter_slice8(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
 {
@@ -280,7 +488,7 @@ static int config_input(AVFilterLink *inlink)
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx = inlink->dst;
     ATADenoiseContext *s = ctx->priv;
-    int depth;
+    int i, depth;
 
     s->nb_planes = desc->nb_components;
 
@@ -291,9 +499,9 @@ static int config_input(AVFilterLink *inlink)
 
     depth = desc->comp[0].depth;
     if (depth == 8)
-        s->filter_slice = filter_slice8;
+        s->filter_slice = s->algo ? filter_slice8_new : filter_slice8;
     else
-        s->filter_slice = filter_slice16;
+        s->filter_slice = s->algo ? filter_slice16_new : filter_slice16;
 
     s->thra[0] = s->fthra[0] * (1 << depth) - 1;
     s->thra[1] = s->fthra[1] * (1 << depth) - 1;
@@ -302,6 +510,13 @@ static int config_input(AVFilterLink *inlink)
     s->thrb[1] = s->fthrb[1] * (1 << depth) - 1;
     s->thrb[2] = s->fthrb[2] * (1 << depth) - 1;
 
+    for (i = 0; i < s->nb_planes; i++) {
+        if (s->planes & (1 << i)) {
+            s->stats[i] = av_calloc(inlink->w, inlink->h * sizeof(ATAStats));
+            if (!s->stats[i])
+                return AVERROR(ENOMEM);
+        }
+    }
     return 0;
 }
 
@@ -399,6 +614,10 @@ static av_cold void uninit(AVFilterContext *ctx)
     ATADenoiseContext *s = ctx->priv;
 
     ff_bufqueue_discard_all(&s->q);
+    av_freep(&s->stats[0]);
+    av_freep(&s->stats[1]);
+    av_freep(&s->stats[2]);
+    av_freep(&s->stats[3]);
 }
 
 static const AVFilterPad inputs[] = {

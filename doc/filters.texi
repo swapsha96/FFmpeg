@@ -4400,6 +4400,10 @@ number in range [5, 129].
 
 @item p
 Set what planes of frame filter will use for averaging. Default is all.
+
+@item a
+Set what alhorithm to use for averaging. Can be @code{old} or @code{new}.
+Default is @code{old}.
 @end table
 
 @section bbox
