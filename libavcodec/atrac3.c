@@ -731,6 +731,103 @@ static int decode_frame(AVCodecContext *avctx, const uint8_t *databuf,
     return 0;
 }
 
+static int al_decode_frame(AVCodecContext *avctx, const uint8_t *databuf,
+                           int size, float **out_samples)
+{
+    ATRAC3Context *q = avctx->priv_data;
+    int ret, i;
+    uint8_t *ptr1;
+
+    if (q->coding_mode == JOINT_STEREO) {
+        /* channel coupling mode */
+        /* decode Sound Unit 1 */
+        ret = init_get_bits8(&q->gb, databuf, size);
+        if (ret < 0)
+            return ret;
+
+        ret = decode_channel_sound_unit(q, &q->gb, q->units, out_samples[0], 0,
+                                        JOINT_STEREO);
+        if (ret != 0)
+            return ret;
+
+        /* Framedata of the su2 in the joint-stereo mode is encoded in
+         * reverse byte order so we need to swap it first. */
+        if (databuf == q->decoded_bytes_buffer) {
+            uint8_t *ptr2 = q->decoded_bytes_buffer + size - 1;
+            ptr1          = q->decoded_bytes_buffer;
+            for (i = 0; i < size / 2; i++, ptr1++, ptr2--)
+                FFSWAP(uint8_t, *ptr1, *ptr2);
+        } else {
+            const uint8_t *ptr2 = databuf + size - 1;
+            for (i = 0; i < size; i++)
+                q->decoded_bytes_buffer[i] = *ptr2--;
+        }
+
+        /* Skip the sync codes (0xF8). */
+        ptr1 = q->decoded_bytes_buffer;
+        for (i = 4; *ptr1 == 0xF8; i++, ptr1++) {
+            if (i >= size)
+                return AVERROR_INVALIDDATA;
+        }
+
+
+        /* set the bitstream reader at the start of the second Sound Unit*/
+        init_get_bits8(&q->gb, ptr1, q->decoded_bytes_buffer + size - ptr1);
+
+        /* Fill the Weighting coeffs delay buffer */
+        memmove(q->weighting_delay, &q->weighting_delay[2],
+                4 * sizeof(*q->weighting_delay));
+        q->weighting_delay[4] = get_bits1(&q->gb);
+        q->weighting_delay[5] = get_bits(&q->gb, 3);
+
+        for (i = 0; i < 4; i++) {
+            q->matrix_coeff_index_prev[i] = q->matrix_coeff_index_now[i];
+            q->matrix_coeff_index_now[i]  = q->matrix_coeff_index_next[i];
+            q->matrix_coeff_index_next[i] = get_bits(&q->gb, 2);
+        }
+
+        /* Decode Sound Unit 2. */
+        ret = decode_channel_sound_unit(q, &q->gb, &q->units[1],
+                                        out_samples[1], 1, JOINT_STEREO);
+        if (ret != 0)
+            return ret;
+
+        /* Reconstruct the channel coefficients. */
+        reverse_matrixing(out_samples[0], out_samples[1],
+                          q->matrix_coeff_index_prev,
+                          q->matrix_coeff_index_now);
+
+        channel_weighting(out_samples[0], out_samples[1], q->weighting_delay);
+    } else {
+        /* Set the bitstream reader at the start of a channel sound unit. */
+        init_get_bits(&q->gb, databuf, size * 8);
+        /* single channels */
+        /* Decode the channel sound units. */
+        for (i = 0; i < avctx->channels; i++) {
+            ret = decode_channel_sound_unit(q, &q->gb, &q->units[i],
+                                            out_samples[i], i, q->coding_mode);
+            if (ret != 0)
+                return ret;
+            int n = 512 - (get_bits_count(&q->gb) & 511);
+            if (n != 512)
+                skip_bits_long(&q->gb, n);
+        }
+    }
+
+    /* Apply the iQMF synthesis filter. */
+    for (i = 0; i < avctx->channels; i++) {
+        float *p1 = out_samples[i];
+        float *p2 = p1 + 256;
+        float *p3 = p2 + 256;
+        float *p4 = p3 + 256;
+        ff_atrac_iqmf(p1, p2, 256, p1, q->units[i].delay_buf1, q->temp_buf);
+        ff_atrac_iqmf(p4, p3, 256, p3, q->units[i].delay_buf2, q->temp_buf);
+        ff_atrac_iqmf(p1, p3, 512, p1, q->units[i].delay_buf3, q->temp_buf);
+    }
+
+    return 0;
+}
+
 static int atrac3_decode_frame(AVCodecContext *avctx, void *data,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
@@ -769,6 +866,28 @@ static int atrac3_decode_frame(AVCodecContext *avctx, void *data,
     *got_frame_ptr = 1;
 
     return avctx->block_align;
+}
+
+static int atrac3al_decode_frame(AVCodecContext *avctx, void *data,
+                                 int *got_frame_ptr, AVPacket *avpkt)
+{
+    AVFrame *frame = data;
+    int ret;
+
+    frame->nb_samples = SAMPLES_PER_FRAME;
+    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
+        return ret;
+
+    ret = al_decode_frame(avctx, avpkt->data, avpkt->size,
+                          (float **)frame->extended_data);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Frame decoding error!\n");
+        return ret;
+    }
+
+    *got_frame_ptr = 1;
+
+    return avpkt->size;
 }
 
 static av_cold void atrac3_init_static_data(void)
@@ -826,7 +945,8 @@ static av_cold int atrac3_decode_init(AVCodecContext *avctx)
         q->coding_mode       = q->coding_mode ? JOINT_STEREO : SINGLE;
         q->scrambled_stream  = 0;
 
-        if (avctx->block_align !=  96 * avctx->channels * frame_factor &&
+        if (avctx->codec_id != AV_CODEC_ID_ATRAC3AL &&
+            avctx->block_align !=  96 * avctx->channels * frame_factor &&
             avctx->block_align != 152 * avctx->channels * frame_factor &&
             avctx->block_align != 192 * avctx->channels * frame_factor) {
             av_log(avctx, AV_LOG_ERROR, "Unknown frame/channel/frame_factor "
@@ -933,6 +1053,20 @@ AVCodec ff_atrac3_decoder = {
     .init             = atrac3_decode_init,
     .close            = atrac3_decode_close,
     .decode           = atrac3_decode_frame,
+    .capabilities     = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
+    .sample_fmts      = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
+                                                        AV_SAMPLE_FMT_NONE },
+};
+
+AVCodec ff_atrac3al_decoder = {
+    .name             = "atrac3al",
+    .long_name        = NULL_IF_CONFIG_SMALL("ATRAC3 AL (Adaptive TRansform Acoustic Coding 3 Advanced Lossless)"),
+    .type             = AVMEDIA_TYPE_AUDIO,
+    .id               = AV_CODEC_ID_ATRAC3AL,
+    .priv_data_size   = sizeof(ATRAC3Context),
+    .init             = atrac3_decode_init,
+    .close            = atrac3_decode_close,
+    .decode           = atrac3al_decode_frame,
     .capabilities     = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
     .sample_fmts      = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                         AV_SAMPLE_FMT_NONE },
