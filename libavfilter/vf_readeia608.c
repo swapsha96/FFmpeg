@@ -46,10 +46,11 @@ typedef struct ReadEIA608Context {
     int max_peak_diff;
     int max_period_diff;
     int max_start_diff;
+    int sync_tolerance;
     int nb_found;
     int white;
     int black;
-    float mpd, mhd, msd, mac, spw, bhd, wth, bth;
+    float mpd, mhd, msd, mac, spw, bhd, wth, bth, sct;
     int chp;
 } ReadEIA608Context;
 
@@ -68,6 +69,7 @@ static const AVOption readeia608_options[] = {
     { "th_w",     "set white color threshold",                                        OFFSET(wth),   AV_OPT_TYPE_FLOAT, {.dbl=.35},   0.1,       1, FLAGS },
     { "th_b",     "set black color threshold",                                        OFFSET(bth),   AV_OPT_TYPE_FLOAT, {.dbl=.15},     0,     0.5, FLAGS },
     { "chp",      "check and apply parity bit",                                       OFFSET(chp),   AV_OPT_TYPE_BOOL,  {.i64= 0},      0,       1, FLAGS },
+    { "sct",      "set ratio of amplitude change tolerance for sync code detection",  OFFSET(sct),   AV_OPT_TYPE_FLOAT, {.dbl=.01},     0,     0.1, FLAGS },
     { NULL }
 };
 
@@ -112,6 +114,7 @@ static int config_input(AVFilterLink *inlink)
     s->max_peak_diff = s->mhd * ((1 << depth) - 1);
     s->max_period_diff = s->mpd * ((1 << depth) - 1);
     s->max_start_diff = s->msd * ((1 << depth) - 1);
+    s->sync_tolerance = s->sct * ((1 << depth) - 1);
     s->white = s->wth * ((1 << depth) - 1);
     s->black = s->bth * ((1 << depth) - 1);
 
@@ -145,18 +148,16 @@ static void extract_line(AVFilterContext *ctx, AVFilterLink *inlink, AVFrame *in
         int Y = src[i];
 
         if (dir == RISE) {
-            if (Y < last) {
+            if (last - Y > s->sync_tolerance && last >= s->white) {
                 dir = FALL;
-                if (last >= s->white) {
-                    clock[peaks][0] = last;
-                    clock[peaks][1] = i;
-                    peaks++;
-                    if (peaks > 7)
-                        break;
-                }
+                clock[peaks][0] = last;
+                clock[peaks][1] = i;
+                peaks++;
+                if (peaks > 7)
+                    break;
             }
         } else if (dir == FALL) {
-            if (Y > last && last <= s->black) {
+            if (Y - last > s->sync_tolerance && last <= s->black) {
                 dir = RISE;
             }
         }
